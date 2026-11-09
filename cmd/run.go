@@ -95,26 +95,17 @@ func init() {
 
 func runSuites(ctx context.Context, testSuites []suites.Suite, toolsDir string, format string, suitesOptions map[string]suites.Options) []*suites.SuiteResult {
 	var (
-		results []*suites.SuiteResult
-		runID   = time.Now().Format("20060102150405")
+		results  []*suites.SuiteResult
+		runID    = time.Now().Format("20060102150405")
+		progress = suites.NewProgressReporter(os.Stderr, runID, len(testSuites))
 	)
 
-	namespace := suites.DefaultNamespace
-	if k8sConfigFlags.Namespace != nil && *k8sConfigFlags.Namespace != "" {
-		namespace = *k8sConfigFlags.Namespace
-	}
+	namespace, cleanup := namespaceDefaultOrProvided()
 	defer func() {
-		if !keepAlive && namespace == suites.DefaultNamespace {
-			if err := runCmdClients.K8sClientSet.CoreV1().Namespaces().Delete(context.Background(), namespace, metav1.DeleteOptions{}); err != nil {
-				if !apierrs.IsNotFound(err) {
-					klog.ErrorS(err, "failed to delete test namespace", "namespace", namespace)
-				}
-			}
-			return
+		if err := cleanup(); err != nil {
+			klog.ErrorS(err, "failed to cleanup test namespace")
 		}
-		klog.InfoS("skipping test namespace cleanup", "namespace", namespace, "keepAlive", keepAlive)
 	}()
-	progress = suites.NewProgressReporter(os.Stderr, runID, len(testSuites))
 
 	for i, suite := range testSuites {
 		suiteOptions := suites.Options{}
@@ -177,6 +168,25 @@ func outRun(results []*suites.SuiteResult, format string) error {
 	}
 	_, err = fmt.Fprintf(os.Stdout, "%s", out)
 	return err
+}
+
+func namespaceDefaultOrProvided() (string, func() error) {
+	namespace := suites.DefaultNamespace
+	if k8sConfigFlags.Namespace != nil && *k8sConfigFlags.Namespace != "" {
+		namespace = *k8sConfigFlags.Namespace
+	}
+
+	cleanup := func() error {
+		if !keepAlive && namespace == suites.DefaultNamespace {
+			if err := runCmdClients.K8sClientSet.CoreV1().Namespaces().Delete(context.Background(), namespace, metav1.DeleteOptions{}); err != nil {
+				if !apierrs.IsNotFound(err) {
+					return fmt.Errorf("failed to delete test namespace %q: %w", namespace, err)
+				}
+			}
+		}
+		return nil
+	}
+	return namespace, cleanup
 }
 
 // canonicalizeRunOptions takes the user-provided run options and canonicalizes

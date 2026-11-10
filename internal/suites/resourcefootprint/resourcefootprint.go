@@ -55,7 +55,7 @@ func (s *ResourceFootprintSuite) SetProgressReporter(progressReporter *suites.Pr
 }
 
 func (s *ResourceFootprintSuite) Name() string {
-	return "control-plane-footprint"
+	return "system-footprint"
 }
 
 func (s *ResourceFootprintSuite) Description() string {

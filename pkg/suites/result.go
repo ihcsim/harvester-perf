@@ -1,6 +1,7 @@
 package suites
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
@@ -183,7 +184,7 @@ type CaseResult struct {
 	DateTimeStart time.Time
 	DateTimeEnd   time.Time
 	Err           string
-	Objects       []runtime.Object
+	Objects       []runtime.Object `json:"-"`
 	State         CaseResultState
 }
 
@@ -396,11 +397,30 @@ func (c *CaseResult) String() string {
 // Err captures errors that occur during command execution, while Stdout and
 // Stderr capture the command's output streams.
 type CmdResult struct {
-	Cmd    string
-	Err    string
-	Node   string
-	Stdout string
-	Stderr string
+	Cmd        string
+	Err        string
+	Node       string
+	Stdout     string          `json:"-"`
+	StdoutJSON json.RawMessage `json:"Stdout"`
+	Stderr     string
+}
+
+// NewCmdResult creates a new CmdResult instance with the provided parameters.
+func NewCmdResult(cmd string, node string, stdout string, stderr string, err error) *CmdResult {
+	r := &CmdResult{
+		Cmd:    cmd,
+		Node:   node,
+		Stdout: stdout,
+		Stderr: stderr,
+	}
+	if json.Valid([]byte(stdout)) {
+		r.StdoutJSON = json.RawMessage(stdout)
+	}
+	if err != nil {
+		r.Err = err.Error()
+	}
+
+	return r
 }
 
 func (c *CmdResult) String() string {
@@ -417,6 +437,9 @@ func (c *CmdResult) String() string {
 	// tabs in stdout and stderr are replaced with 4 spaces to avoid conflicts with
 	// the tabwriter output
 	if stdout := c.Stdout; stdout != "" {
+		if json.Valid([]byte(stdout)) {
+			fmt.Fprintf(&sb, "%s", json.RawMessage(stdout))
+		}
 		if trimmed := strings.TrimSpace(string(stdout)); trimmed != "" {
 			fmt.Fprintln(&sb, "Out:")
 			fmt.Fprintf(&sb, "%s\n", strings.ReplaceAll(trimmed, "\t", "    "))

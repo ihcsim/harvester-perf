@@ -169,22 +169,22 @@ func (s *NodeCapacitySuite) execNodeDiskInfo(
 	klog.V(3).InfoS("daemonset is ready", "name", ds.Name, "readyPodCount", ds.Status.NumberReady, "suite", s.Name(), "case", caseName)
 
 	var cmdResults []*suites.CmdResult
-	cmds := [][]string{
-		{"nsenter", "--target", "1", "--mount", "--", "lsblk", "-o", "NAME,KNAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,TYPE,PKNAME"},
+	cmd := []string{"nsenter", "--target", "1", "--mount", "--", "lsblk", "-o", "NAME,KNAME,SIZE,FSTYPE,LABEL,MOUNTPOINT,TYPE,PKNAME"}
+	if opts.LsblkOutputFormat != "" {
+		cmd = append(cmd, opts.LsblkOutputFormat)
 	}
+	cmds := [][]string{cmd}
 	for _, pod := range pods {
 		for _, cmd := range cmds {
 			klog.V(5).InfoS("exec", "cmd", strings.Join(cmd, " "), "pod", pod.Name, "suite", s.Name(), "case", caseName)
 			out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
-			cmdResult := &suites.CmdResult{
-				Cmd:    strings.Join(cmd, " "),
-				Node:   pod.Spec.NodeName,
-				Stdout: out.Stdout,
-				Stderr: out.Stderr,
-			}
-			if err != nil {
-				cmdResult.Err = err.Error()
-			}
+			cmdResult := suites.NewCmdResult(
+				strings.Join(cmd, " "),
+				pod.Spec.NodeName,
+				out.Stdout,
+				out.Stderr,
+				err,
+			)
 			cmdResults = append(cmdResults, cmdResult)
 		}
 	}
@@ -209,6 +209,7 @@ func (s *NodeCapacitySuite) SetProgressReporter(reporter *suites.ProgressReporte
 }
 
 type CapacityOptions struct {
+	LsblkOutputFormat     string
 	NamespaceReadyTimeout time.Duration
 	PodActiveDeadline     time.Duration
 	PodImageName          string
@@ -220,5 +221,16 @@ func NewCapacityOptions(override suites.Options) (*CapacityOptions, error) {
 	runOpts := options.DefaultGlobalOptions().
 		Merge(options.DefaultNodeCapacityOptions()).
 		Merge(override)
+
+	defaultOutputOpts := func() {
+		runOpts["lsblkOutputFormat"] = ""
+	}
+	jsonOutputOpts := func() {
+		runOpts["lsblkOutputFormat"] = "-J"
+	}
+	if err := runOpts.SetOutputFormat(defaultOutputOpts, jsonOutputOpts); err != nil {
+		return nil, fmt.Errorf("failed to set output format: %w", err)
+	}
+
 	return options.FromOptions[*CapacityOptions](runOpts)
 }

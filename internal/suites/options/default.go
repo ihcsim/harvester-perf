@@ -22,8 +22,9 @@ func DefaultGlobalOptions() suites.Options {
 		"monitoringAddonName":             "rancher-monitoring",
 		"monitoringNamespace":             "cattle-monitoring-system",
 		"monitoringRangeDuration":         300 * time.Second,
-		"monitoringWaitPodMonitorTimeout": 600 * time.Second, // 2x the EtcdRangeDuration to allow for Prometheus to scrape etcd metrics
-		"namespaceReadyTimeout":           300 * time.Second, // accommodate for cleanup in back-to-back test runs
+		"monitoringWaitPodMonitorTimeout": 600 * time.Second,          // 2x the EtcdRangeDuration to allow for Prometheus to scrape etcd metrics
+		"namespaceReadyTimeout":           300 * time.Second,          // accommodate for cleanup in back-to-back test runs
+		"outputFormat":                    suites.OutputFormatDefault, // default means use the tools default output format
 	}
 }
 
@@ -38,7 +39,6 @@ func DefaultEtcdBenchmarkOptions() suites.Options {
 		"etcdMetricsScheme":       "http",
 		"etcdRemoteCopyTargetDir": "/usr/local/bin/",
 		"etcdRemoteTLSCertDir":    "/host/rancher/rke2/server/tls/etcd",
-		"monitoringOutputFormat":  "promql",
 		"checkPerfLoadSize":       "s",
 		"putLoadSize":             10000,
 		"putKeySize":              8,

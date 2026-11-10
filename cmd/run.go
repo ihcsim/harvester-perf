@@ -60,17 +60,20 @@ specified as a list of comma-separated arguments.`,
 			return err
 		}
 
-		toolsDir, err := toolsDirPath()
-		if err != nil {
-			return err
-		}
-
 		suitesOptions, err := canonicalizeRunOptions(testSuites)
 		if err != nil {
 			return err
 		}
 
+		toolsDir, err := toolsDirPath()
+		if err != nil {
+			return err
+		}
 		outputFormat := *k8sPrintFlags.OutputFormat
+		if err := supportedOutputFormat(outputFormat); err != nil {
+			return err
+		}
+
 		results := runSuites(cmd.Context(), testSuites, toolsDir, outputFormat, suitesOptions)
 		return outRun(results, outputFormat)
 	},
@@ -93,12 +96,18 @@ func init() {
 	}
 }
 
-func runSuites(ctx context.Context, testSuites []suites.Suite, toolsDir string, format string, suitesOptions map[string]suites.Options) []*suites.SuiteResult {
+func runSuites(
+	ctx context.Context,
+	testSuites []suites.Suite,
+	toolsDir string,
+	outputFormat string,
+	suitesOptions map[string]suites.Options,
+) []*suites.SuiteResult {
 	var (
-		results  []*suites.SuiteResult
-		runID    = time.Now().Format("20060102150405")
-		progress = suites.NewProgressReporter(os.Stderr, runID, len(testSuites))
+		results []*suites.SuiteResult
+		runID   = time.Now().Format("20060102150405")
 	)
+	progress = suites.NewProgressReporter(os.Stderr, runID, len(testSuites))
 
 	namespace, cleanup := namespaceDefaultOrProvided()
 	defer func() {
@@ -108,17 +117,14 @@ func runSuites(ctx context.Context, testSuites []suites.Suite, toolsDir string, 
 	}()
 
 	for i, suite := range testSuites {
-		suiteOptions := suites.Options{}
-		if o, exists := suitesOptions["global"]; exists {
-			maps.Copy(suiteOptions, o)
-		}
-		if o, exists := suitesOptions[suite.Name()]; exists {
-			maps.Copy(suiteOptions, o)
-		}
+		suiteOptions := flattenOverrides(suite, suitesOptions)
 
-		// every test suite gets toolsDir, needed by suites identify the location of
-		// tools like etcdctl, netperf etc. it is not overridable
+		// every test suite gets toolsDir and outputFormat
 		suiteOptions["toolsDir"] = toolsDir
+		suiteOptions["outputFormat"] = suites.OutputFormatDefault
+		if outputFormat != "" {
+			suiteOptions["outputFormat"] = suites.OutputFormat(outputFormat)
+		}
 
 		suite = suites.WithClients(suite, runCmdClients)
 		suite = suites.WithProgressReporter(suite, progress)
@@ -126,6 +132,24 @@ func runSuites(ctx context.Context, testSuites []suites.Suite, toolsDir string, 
 		results = append(results, &result)
 	}
 	return results
+}
+
+// flattenOverrides takes the user-provided run options and flattens them into a
+// single Options map for the given test suite. The global options are applied
+// first, followed by the suite-specific options, with the latter taking
+// precedence in case of conflicts.
+func flattenOverrides(suite suites.Suite, overrides map[string]suites.Options) suites.Options {
+	suiteOptions := suites.Options{}
+
+	// flattened the global options into the suite options
+	if o, exists := overrides["global"]; exists {
+		maps.Copy(suiteOptions, o)
+	}
+	if o, exists := overrides[suite.Name()]; exists {
+		maps.Copy(suiteOptions, o)
+	}
+
+	return suiteOptions
 }
 
 func runSuite(ctx context.Context, runID, namespace string, testSuite suites.Suite, i int, opts suites.Options) suites.SuiteResult {
@@ -248,4 +272,11 @@ func canonicalizeRunOptions(testSuites []suites.Suite) (map[string]suites.Option
 	}
 
 	return canonicalizedOptions, errs
+}
+
+func supportedOutputFormat(format string) error {
+	if format != "" && format != "json" {
+		return fmt.Errorf("unsupported output format %q, supported formats are: json", format)
+	}
+	return nil
 }

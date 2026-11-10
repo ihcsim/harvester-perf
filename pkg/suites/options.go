@@ -8,7 +8,16 @@ import (
 	"strings"
 )
 
-const DefaultNamespace = "harvester-perf-system"
+const (
+	DefaultNamespace = "harvester-perf-system"
+)
+
+type OutputFormat string
+
+var (
+	OutputFormatJSON    OutputFormat = "json"
+	OutputFormatDefault OutputFormat = "default"
+)
 
 // Options contains custom options for test suites. The keys are the names of the
 // test suites, and the values are the options for each suite.
@@ -131,4 +140,38 @@ func (o Options) canonicalizeKeys(schema Options) (Options, error) {
 		canonicalized[canonicalizedKey] = v
 	}
 	return canonicalized, errs
+}
+
+// SetToolPaths sets the tool paths for the suite based on the "toolsDir" option.
+// "toolsDir" is the same path that is used by the 'tool' command. It is not
+// configurable.
+func (o Options) SetToolPaths(setOpts func(string)) error {
+	toolsDir, exists := o["toolsDir"]
+	if !exists {
+		return fmt.Errorf("toolsDir option is required but not provided")
+	}
+	cast, ok := toolsDir.(string)
+	if !ok {
+		return fmt.Errorf("toolsDir option must be a string, but got %T", toolsDir)
+	}
+
+	setOpts(cast)
+	return nil
+}
+
+// SetOutputFormat sets the output format for the suite based on the
+// "outputFormat" option. setJSONOpts is called if the output format is set to
+// JSON by the CLI -o flag. Otherwise, setDefaultOpts is called.
+func (o Options) SetOutputFormat(setDefaultOpts func(), setJSONOpts func()) error {
+	ofmt, ok := o["outputFormat"].(OutputFormat)
+	if !ok {
+		return fmt.Errorf("outputFormat option must be of type suites.OutputFormat, but got %T", o["outputFormat"])
+	}
+
+	if ofmt == OutputFormatJSON {
+		setJSONOpts()
+		return nil
+	}
+	setDefaultOpts()
+	return nil
 }

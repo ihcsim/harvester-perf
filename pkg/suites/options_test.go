@@ -2,6 +2,7 @@ package suites
 
 import (
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -373,5 +374,74 @@ func TestCanonicalizeNilReceiver(t *testing.T) {
 	}
 	if len(got) != 0 {
 		t.Errorf("Canonicalize() = %v, want empty", got)
+	}
+}
+
+func TestSetToolsPath(t *testing.T) {
+	o := Options{"toolsDir": "/usr/local/bin"}
+	setOpts := func(toolsDir string) {
+		o["myToolBin"] = filepath.Join(toolsDir, "my-tool")
+		o["myToolV2Bin"] = filepath.Join(toolsDir, "my-tool-v2")
+		o["myToolV2.1Bin"] = filepath.Join(toolsDir, "my-tool-v2.1")
+	}
+	if err := o.SetToolPaths(setOpts); err != nil {
+		t.Fatalf("SetToolPaths() returned an error: %v", err)
+	}
+
+	if diff := cmp.Diff(o["myToolBin"], "/usr/local/bin/my-tool"); diff != "" {
+		t.Errorf("SetToolPaths() mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(o["myToolV2Bin"], "/usr/local/bin/my-tool-v2"); diff != "" {
+		t.Errorf("SetToolPaths() mismatch (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(o["myToolV2.1Bin"], "/usr/local/bin/my-tool-v2.1"); diff != "" {
+		t.Errorf("SetToolPaths() mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestSetOutputFormat(t *testing.T) {
+	o := Options{}
+	setDefaultOpts := func() {
+		o["myToolOutputFormat"] = "table"
+	}
+	setJSONOpts := func() {
+		o["myToolOutputFormat"] = "json"
+	}
+
+	testCases := []struct {
+		name         string
+		outputFormat OutputFormat
+		want         string
+	}{
+		{
+			name: "unspecified output format defaults to 'table'",
+			want: "table",
+		},
+		{
+			name:         "default output format is 'table'",
+			outputFormat: OutputFormatDefault,
+			want:         "table",
+		},
+		{
+			name:         "json output format is 'json'",
+			outputFormat: OutputFormatJSON,
+			want:         "json",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run("unspecified output format", func(t *testing.T) {
+			defer func() {
+				o["outputFormat"] = ""
+			}()
+
+			o["outputFormat"] = tc.outputFormat
+			if err := o.SetOutputFormat(setDefaultOpts, setJSONOpts); err != nil {
+				t.Fatalf("SetOutputFormat() returned an error: %v", err)
+			}
+
+			if diff := cmp.Diff(o["myToolOutputFormat"], tc.want); diff != "" {
+				t.Errorf("SetOutputFormat() mismatch (-want +got):\n%s", diff)
+			}
+		})
 	}
 }

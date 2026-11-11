@@ -8,6 +8,7 @@ import (
 	"github.com/harvester/hvperf/pkg/suites"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrs "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	watchapi "k8s.io/apimachinery/pkg/watch"
@@ -19,6 +20,16 @@ import (
 // EnsureNamespace ensures that the specified namespace exists. If the namespace
 // does not exist, it will be created.
 func EnsureNamespace(ctx context.Context, clients *suites.Clients, namespace string, readyTimeout time.Duration) (*corev1.Namespace, error) {
+	ns, err := clients.K8sClientSet.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	if err != nil {
+		if !apierrs.IsNotFound(err) {
+			return nil, err
+		}
+	}
+	if !ns.DeletionTimestamp.IsZero() {
+		return nil, fmt.Errorf("namespace %s is being deleted - can't continue", namespace)
+	}
+
 	applyConfig := corev1apply.Namespace(namespace)
 	created, err := clients.K8sClientSet.CoreV1().Namespaces().Apply(ctx, applyConfig, metav1.ApplyOptions{
 		FieldManager: DefaultSSAFieldManager,

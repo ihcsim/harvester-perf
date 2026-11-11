@@ -172,7 +172,7 @@ func outRun(results []*suites.SuiteResult, format string) error {
 	)
 	switch format {
 	case "json":
-		out, err = json.Marshal(results)
+		out, err = json.MarshalIndent(results, "", "  ")
 		if err != nil {
 			return err
 		}

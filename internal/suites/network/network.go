@@ -120,7 +120,7 @@ func (s *NetworkSuite) RunE(
 
 	caseResults := []*suites.CaseResult{}
 	for _, testCase := range testSuites {
-		tcName := fmt.Sprintf("%s-%s", testCase.name, testCase.profile)
+		tcName := fmt.Sprintf("%s %s", testCase.name, testCase.profile)
 		s.CaseStart(s.Name(), tcName)
 		caseResult := testCase.fn(ctx, tcName, runID, namespace, testCase.profile, o)
 		caseResults = append(caseResults, caseResult)

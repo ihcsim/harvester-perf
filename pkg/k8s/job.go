@@ -59,7 +59,7 @@ func EnsureJobReady(
 					RestartPolicy: corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:            "hvperf",
+							Name:            suites.DefaultPrimaryContainerName,
 							Image:           imageName,
 							ImagePullPolicy: corev1.PullIfNotPresent,
 							Command:         []string{"/bin/bash", "-c", fmt.Sprintf("sleep %v", jobActiveDeadline.Seconds())},

@@ -9,7 +9,8 @@ import (
 )
 
 const (
-	DefaultNamespace = "harvester-perf-system"
+	DefaultNamespace            = "harvester-perf-system"
+	DefaultPrimaryContainerName = "hvperf"
 )
 
 type OutputFormat string
@@ -179,5 +180,5 @@ func (o Options) SetOutputFormat(setDefaultOpts func(), setJSONOpts func()) erro
 // SetPrimaryContainerName sets the default primary container name for the test
 // workloads used in test suites. This name should not be changed.
 func (o Options) SetPrimaryContainerName() {
-	o["defaultPrimaryContainerName"] = "hvperf"
+	o["defaultPrimaryContainerName"] = DefaultPrimaryContainerName
 }

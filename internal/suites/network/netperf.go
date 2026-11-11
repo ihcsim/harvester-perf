@@ -96,15 +96,14 @@ func (s *NetworkSuite) netperfServer(
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, time.Duration(3*(o.NetPerfTestLengthSeconds+o.NetPerfTestStartWaitSeconds))*time.Second)
 	defer cancel()
 
+	var cmdResult *suites.CmdResult
 	cmd := []string{"netserver", "-d", string(o.NetPerfIPFamily)}
 	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
-	cmdResult := &suites.CmdResult{
-		Cmd:    strings.Join(cmd, " "),
-		Stdout: out.Stdout,
-		Stderr: out.Stderr,
-	}
 	if err != nil {
-		cmdResult.Err = err.Error()
+		// netperf server's stdout and stderr are interesting only if there is an error
+		cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
+	} else {
+		cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, "", "", nil)
 	}
 
 	return []*suites.CmdResult{cmdResult}, job, pod, nil
@@ -140,16 +139,25 @@ func (s *NetworkSuite) netperfClient(
 		"-t", string(profile),
 		"--",
 	}
-	cmd = append(cmd, ProfileParams[profile]...)
+	cmd = append(cmd, o.NetPerfOutputFormat)
+	cmd = append(cmd, NetPerfProfileParams[profile]...)
 	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
-	cmdResult := &suites.CmdResult{
-		Cmd:    strings.Join(cmd, " "),
-		Stdout: out.Stdout,
-		Stderr: out.Stderr,
+
+	// if the test output is rendered as json, we need to replace the newlines with
+	// | so that the output can be parsed as a value of a json object.
+	stdout := out.Stdout
+	if stdout != "" && o.NetPerfOutputFormat == "-k" {
+		stdout = strings.ReplaceAll(stdout, "\n", "|")
+		stdout = fmt.Sprintf(`{"out":"%s"}`, stdout)
 	}
-	if err != nil {
-		cmdResult.Err = err.Error()
-	}
+
+	cmdResult := suites.NewCmdResult(
+		cmd,
+		pod.Spec.NodeName,
+		stdout,
+		out.Stderr,
+		err,
+	)
 	return []*suites.CmdResult{cmdResult}, job, pod, nil
 }
 
@@ -215,4 +223,14 @@ func (s *NetworkSuite) netperfSetup(
 		return nil, nil, err
 	}
 	return job, pod, nil
+}
+
+// NetPerfProfileParams are parameters for each test profile derived from k8s-netperf's
+// implementation
+var NetPerfProfileParams = map[ProfileName][]string{
+	ProfileTCPCRR:    {"THROUGHPUT,THROUGHPUT_UNITS,MIN_LATENCY,MEAN_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,MAX_LATENCY,STDDEV_LATENCY,LOCAL_TRANSPORT_RETRANS", "-r", "1024,1024", "-P", "42424"},
+	ProfileTCPRR:     {"THROUGHPUT,THROUGHPUT_UNITS,MIN_LATENCY,MEAN_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,MAX_LATENCY,STDDEV_LATENCY,LOCAL_TRANSPORT_RETRANS", "-r", "1024,1024", "-P", "42424"},
+	ProfileTCPStream: {"THROUGHPUT,THROUGHPUT_UNITS,LOCAL_SEND_CALLS,REMOTE_RECV_CALLS,LOCAL_TRANSPORT_RETRANS", "-m", "1024", "-P", "42424"},
+	ProfileUDPRR:     {"THROUGHPUT,THROUGHPUT_UNITS,MIN_LATENCY,MEAN_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,MAX_LATENCY,STDDEV_LATENCY,LOCAL_TRANSPORT_RETRANS", "-r", "1024,1024", "-P", "42424"},
+	ProfileUDPStream: {"THROUGHPUT,THROUGHPUT_UNITS,LOCAL_SEND_CALLS,REMOTE_RECV_CALLS,LOCAL_TRANSPORT_RETRANS", "-m", "1024", "-R", "1", "-P", "42424"},
 }

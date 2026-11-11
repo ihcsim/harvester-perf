@@ -151,12 +151,14 @@ type NetworkOptions struct {
 	IPerfClientMessageSizeBytes int
 	IPerfClientParallelStreams  int
 	IPerfIPFamily               IPFamilyOption
+	IPerfOutputFormat           string
 	IPerfRemoteCopyTargetDir    string
 	IPerfServerPort             int
 	IPerfTestDurationSeconds    int
 
 	NetPerfIPFamily             IPFamilyOption
 	NetPerfClientLocalPath      string
+	NetPerfOutputFormat         string
 	NetPerfServerLocalPath      string
 	NetPerfRemoteCopyTargetDir  string
 	NetPerfTestStartWaitSeconds int
@@ -168,18 +170,24 @@ func NewNetworkOptions(override suites.Options) (*NetworkOptions, error) {
 		Merge(options.DefaultNetworkOptions()).
 		Merge(override)
 
-	// the tools local paths are derived from the toolsDir, set by the 'tool' command
-	toolsDir, exists := merged["toolsDir"]
-	if !exists {
-		return nil, fmt.Errorf("toolsDir option is required but not provided")
+	if err := merged.SetToolPaths(func(toolsDir string) {
+		merged["netPerfClientLocalPath"] = filepath.Join(toolsDir, "netperf")
+		merged["netPerfServerLocalPath"] = filepath.Join(toolsDir, "netserver")
+		merged["iPerfBinLocalPath"] = filepath.Join(toolsDir, "iperf3")
+	}); err != nil {
+		return nil, fmt.Errorf("failed to set tool paths: %w", err)
 	}
-	cast, ok := toolsDir.(string)
-	if !ok {
-		return nil, fmt.Errorf("toolsDir option must be a string, but got %T", toolsDir)
+
+	defaultOutputOpts := func() {
+		merged["netPerfOutputFormat"] = "-O"
 	}
-	merged["netPerfClientLocalPath"] = filepath.Join(cast, "netperf")
-	merged["netPerfServerLocalPath"] = filepath.Join(cast, "netserver")
-	merged["iPerfBinLocalPath"] = filepath.Join(cast, "iperf3")
+	jsonOutputOpts := func() {
+		merged["iPerfOutputFormat"] = "-J"
+		merged["netPerfOutputFormat"] = "-k"
+	}
+	if err := merged.SetOutputFormat(defaultOutputOpts, jsonOutputOpts); err != nil {
+		return nil, fmt.Errorf("failed to set output format: %w", err)
+	}
 
 	return options.FromOptions[*NetworkOptions](merged)
 }
@@ -236,13 +244,3 @@ const (
 	ProfileUDPRR     ProfileName = "UDP_RR"
 	ProfileUDPStream ProfileName = "UDP_STREAM"
 )
-
-// ProfileParams are parameters for each test profile derived from k8s-netperf's
-// implementation
-var ProfileParams = map[ProfileName][]string{
-	ProfileTCPCRR:    {"-O", "THROUGHPUT,THROUGHPUT_UNITS,MIN_LATENCY,MEAN_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,MAX_LATENCY,STDDEV_LATENCY,LOCAL_TRANSPORT_RETRANS", "-r", "1024,1024", "-P", "42424"},
-	ProfileTCPRR:     {"-O", "THROUGHPUT,THROUGHPUT_UNITS,MIN_LATENCY,MEAN_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,MAX_LATENCY,STDDEV_LATENCY,LOCAL_TRANSPORT_RETRANS", "-r", "1024,1024", "-P", "42424"},
-	ProfileTCPStream: {"-O", "THROUGHPUT,THROUGHPUT_UNITS,LOCAL_SEND_CALLS,REMOTE_RECV_CALLS,LOCAL_TRANSPORT_RETRANS", "-m", "1024", "-P", "42424"},
-	ProfileUDPRR:     {"-O", "THROUGHPUT,THROUGHPUT_UNITS,MIN_LATENCY,MEAN_LATENCY,P50_LATENCY,P90_LATENCY,P99_LATENCY,MAX_LATENCY,STDDEV_LATENCY,LOCAL_TRANSPORT_RETRANS", "-r", "1024,1024", "-P", "42424"},
-	ProfileUDPStream: {"-O", "THROUGHPUT,THROUGHPUT_UNITS,LOCAL_SEND_CALLS,REMOTE_RECV_CALLS,LOCAL_TRANSPORT_RETRANS", "-m", "1024", "-R", "1", "-P", "42424"},
-}

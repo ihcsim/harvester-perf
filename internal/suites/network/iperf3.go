@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/harvester/hvperf/pkg/k8s"
@@ -97,15 +96,7 @@ func (s *NetworkSuite) iperf3Server(
 
 	cmd := []string{"iperf3", "-s", "-D", "-p", strconv.Itoa(o.IPerfServerPort)}
 	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
-	cmdResult := &suites.CmdResult{
-		Cmd:    strings.Join(cmd, " "),
-		Stdout: out.Stdout,
-		Stderr: out.Stderr,
-	}
-	if err != nil {
-		cmdResult.Err = err.Error()
-	}
-
+	cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 	return []*suites.CmdResult{cmdResult}, job, pod, nil
 }
 
@@ -140,18 +131,14 @@ func (s *NetworkSuite) iperf3Client(
 		"-l", strconv.Itoa(o.IPerfClientMessageSizeBytes),
 		"-p", strconv.Itoa(o.IPerfServerPort),
 	}
+	if o.IPerfOutputFormat != "" {
+		cmd = append(cmd, o.IPerfOutputFormat)
+	}
 	if profile == ProfileUDPStream {
 		cmd = append(cmd, "-u", "-b", "0")
 	}
 	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
-	cmdResult := &suites.CmdResult{
-		Cmd:    strings.Join(cmd, " "),
-		Stdout: out.Stdout,
-		Stderr: out.Stderr,
-	}
-	if err != nil {
-		cmdResult.Err = err.Error()
-	}
+	cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 	return []*suites.CmdResult{cmdResult}, job, pod, nil
 }
 

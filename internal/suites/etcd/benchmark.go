@@ -3,6 +3,7 @@ package etcd
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	prom "github.com/harvester/hvperf/pkg/prometheus"
 	"github.com/harvester/hvperf/pkg/suites"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -75,6 +77,15 @@ func (s *BenchmarkSuite) RunE(
 	klog.V(3).Infof("namespace:'%s' is now ready\n", namespace)
 
 	// ensure the job is created and ready
+	overrides := func(job *batchv1.Job) error {
+		job.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{
+			{
+				Name:  "ARTIFACTS",
+				Value: "/artifacts",
+			},
+		}
+		return nil
+	}
 	_, pod, err := k8s.EnsureJobReady(ctx, s.Clients,
 		s.Name(),
 		runID,
@@ -84,7 +95,8 @@ func (s *BenchmarkSuite) RunE(
 		o.JobActiveDeadline,
 		o.JobPodReadyTimeout,
 		o.JobPodTTLAfterFinished,
-		o.JobSuspend)
+		o.JobSuspend,
+		overrides)
 	if err != nil {
 		return suites.NewSuiteResult(s.Name(), runID).WithError(fmt.Errorf("failed to ensure etcd benchmark job is ready: %w", err))
 	}
@@ -183,29 +195,22 @@ func (s *BenchmarkSuite) execHealthcheck(
 	opts *BenchmarkOptions,
 	args ...string,
 ) *suites.CaseResult {
-	outArgs := []string{
-		"-w", opts.EtcdctlOutputFormat,
-	}
 	cmds := [][]string{
 		{"etcdctl", "endpoint", "status"},
 		{"etcdctl", "endpoint", "health"},
 		{"etcdctl", "member", "list"},
 	}
+	outArgs := []string{
+		"-w", opts.EtcdctlOutputFormat,
+	}
 
 	var cmdResults []*suites.CmdResult
 	start := time.Now()
-	args = append(args, outArgs...)
 	for _, cmd := range cmds {
+		cmd = append(cmd, outArgs...)
 		cmd = append(cmd, args...)
 		out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
-		cmdResult := &suites.CmdResult{
-			Cmd:    strings.Join(cmd, " "),
-			Stdout: out.Stdout,
-			Stderr: out.Stderr,
-		}
-		if err != nil {
-			cmdResult.Err = err.Error()
-		}
+		cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 		cmdResults = append(cmdResults, cmdResult)
 	}
 	return suites.NewCaseResult(name, start, time.Now(), cmdResults, nil, pod)
@@ -232,15 +237,26 @@ func (s *BenchmarkSuite) execCheckPerf(
 	for _, cmd := range cmds {
 		cmd = append(cmd, args...)
 		out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
-		cmdResult := &suites.CmdResult{
-			Cmd:    strings.Join(cmd, " "),
-			Stdout: out.Stdout,
-			Stderr: out.Stderr,
+
+		// 'check perf' doesn't return json output, so we wrap the output in a json
+		// object
+		stdout := out.Stdout
+		if stdout != "" && opts.EtcdctlOutputFormat == "json" {
+			stdout = strings.ReplaceAll(stdout, "\n", "|")
+			stdout = fmt.Sprintf(`{"out": "%s"}`, stdout)
 		}
-		if err != nil {
-			cmdResult.Err = err.Error()
-		}
+		cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, stdout, "", err)
 		cmdResults = append(cmdResults, cmdResult)
+
+		// 'check perf' usually returns very verbose stderr output. instead of cramming
+		// it into the result, we save it to a file in the current working directory.
+		if out.Stderr != "" {
+			timestamp := time.Now().Format("20060102-150405")
+			savedTo := filepath.Join("./", fmt.Sprintf("%s-%s-stderr.log", name, timestamp))
+			if err := os.WriteFile(savedTo, []byte(out.Stderr), 0o644); err != nil {
+				klog.V(3).ErrorS(err, "failed to save benchmark stderr output to file", "file", savedTo)
+			}
+		}
 	}
 
 	return suites.NewCaseResult(name, start, time.Now(), cmdResults, nil, pod)
@@ -290,15 +306,36 @@ func (s *BenchmarkSuite) execBenchmark(
 	var cmdResults []*suites.CmdResult
 	start := time.Now()
 	for _, cmd := range cmds {
-		cmd = append(cmd, args...)
-		out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
-		cmdResult := &suites.CmdResult{
-			Cmd:    strings.Join(cmd, " "),
-			Stdout: out.Stdout,
-			Stderr: out.Stderr,
+		if opts.EtcdBenchmarkOutputFormat != "" {
+			cmd = append(cmd, opts.EtcdBenchmarkOutputFormat)
 		}
-		if err != nil {
-			cmdResult.Err = err.Error()
+		cmd = append(cmd, args...)
+
+		var cmdResult *suites.CmdResult
+		outExec, errExec := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+		cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, outExec.Stdout, "", errExec)
+
+		// the benchmark tool usually returns very verbose stderr output. instead of
+		// cramming it into the result, we save it to a file in the current working directory.
+		if outExec.Stderr != "" {
+			timestamp := time.Now().Format("20060102-150405")
+			savedTo := filepath.Join("./", fmt.Sprintf("%s-%s-stderr.log", name, timestamp))
+			if err := os.WriteFile(savedTo, []byte(outExec.Stderr), 0o644); err != nil {
+				klog.V(3).ErrorS(err, "failed to save benchmark stderr output to file", "file", savedTo)
+			}
+		}
+
+		// if benchmark completed with no errors and the output format is set to
+		// --report-perfdash, then we need to cat the json result file in the
+		// container's /artifacts folder
+		if errExec == nil && opts.EtcdBenchmarkOutputFormat == "--report-perfdash" {
+			cmdFind := []string{
+				"/bin/bash",
+				"-c",
+				"find /artifacts/ -type f -name '*.json' -exec cat {} + && rm /artifacts/*.json",
+			}
+			outFind, errFind := k8s.ExecPod(ctx, s.Clients, pod, cmdFind)
+			cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, outFind.Stdout, outFind.Stderr, errFind)
 		}
 		cmdResults = append(cmdResults, cmdResult)
 	}
@@ -418,15 +455,16 @@ func (s *BenchmarkSuite) SetProgressReporter(progressReporter *suites.ProgressRe
 }
 
 type BenchmarkOptions struct {
-	EtcdBenchmarkLocalPath string
-	EtcdctlLocalPath       string
+	EtcdBenchmarkLocalPath    string
+	EtcdBenchmarkOutputFormat string
 
-	EtcdctlOutputFormat     string
+	EtcdctlLocalPath    string
+	EtcdctlOutputFormat string
+
 	EtcdEndpoints           string
 	EtcdMetricsPath         string
 	EtcdMetricsPortName     string
 	EtcdMetricsScheme       string
-	MonitoringRangeDuration time.Duration
 	EtcdNamespace           string
 	EtcdReadyTimeout        time.Duration
 	EtcdRemoteTLSCertDir    string
@@ -442,7 +480,7 @@ type BenchmarkOptions struct {
 
 	MonitoringAddonName             string
 	MonitoringNamespace             string
-	MonitoringOutputFormat          string
+	MonitoringRangeDuration         time.Duration
 	MonitoringWaitPodMonitorTimeout time.Duration
 
 	NamespaceReadyTimeout time.Duration
@@ -462,17 +500,23 @@ func NewBenchmarkOptions(override suites.Options) (*BenchmarkOptions, error) {
 		Merge(options.DefaultEtcdBenchmarkOptions()).
 		Merge(override)
 
-	// the tools local paths are derived from the toolsDir, set by the 'tool' command
-	toolsDir, exists := merged["toolsDir"]
-	if !exists {
-		return nil, fmt.Errorf("toolsDir option is required but not provided")
+	if err := merged.SetToolPaths(func(toolsDir string) {
+		merged["etcdBenchmarkLocalPath"] = filepath.Join(toolsDir, "benchmark")
+		merged["etcdctlLocalPath"] = filepath.Join(toolsDir, "etcdctl")
+	}); err != nil {
+		return nil, fmt.Errorf("failed to set tool paths: %w", err)
 	}
-	cast, ok := toolsDir.(string)
-	if !ok {
-		return nil, fmt.Errorf("toolsDir option must be a string, but got %T", toolsDir)
+
+	defaultOutputOpts := func() {
+		merged["etcdctlOutputFormat"] = "simple"
 	}
-	merged["etcdBenchmarkLocalPath"] = filepath.Join(cast, "benchmark")
-	merged["etcdctlLocalPath"] = filepath.Join(cast, "etcdctl")
+	jsonOutputOpts := func() {
+		merged["etcdctlOutputFormat"] = "json"
+		merged["etcdBenchmarkOutputFormat"] = "--report-perfdash"
+	}
+	if err := merged.SetOutputFormat(defaultOutputOpts, jsonOutputOpts); err != nil {
+		return nil, fmt.Errorf("failed to set output format: %w", err)
+	}
 
 	return options.FromOptions[*BenchmarkOptions](merged)
 }

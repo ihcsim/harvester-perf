@@ -3,3 +3,4 @@ results/
 bin
 dist
 hvperf
+*.log

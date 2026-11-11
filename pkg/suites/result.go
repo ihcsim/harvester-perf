@@ -405,15 +405,15 @@ type CmdResult struct {
 	Cmd        string
 	Err        string
 	Node       string
-	Stdout     string          `json:"-"`
-	StdoutJSON json.RawMessage `json:"Stdout"`
+	Stdout     string `json:"-"`
 	Stderr     string
+	StdoutJSON json.RawMessage `json:"Stdout"`
 }
 
 // NewCmdResult creates a new CmdResult instance with the provided parameters.
-func NewCmdResult(cmd string, node string, stdout string, stderr string, err error) *CmdResult {
+func NewCmdResult(cmd []string, node string, stdout string, stderr string, err error) *CmdResult {
 	r := &CmdResult{
-		Cmd:    cmd,
+		Cmd:    strings.Join(cmd, " "),
 		Node:   node,
 		Stdout: stdout,
 		Stderr: stderr,
@@ -441,9 +441,6 @@ func (c *CmdResult) String() string {
 	// tabs in stdout and stderr are replaced with 4 spaces to avoid conflicts with
 	// the tabwriter output
 	if stdout := c.Stdout; stdout != "" {
-		if json.Valid([]byte(stdout)) {
-			fmt.Fprintf(&sb, "%s", json.RawMessage(stdout))
-		}
 		if trimmed := strings.TrimSpace(string(stdout)); trimmed != "" {
 			fmt.Fprintln(&sb, "Out:")
 			fmt.Fprintf(&sb, "%s\n", strings.ReplaceAll(trimmed, "\t", "    "))

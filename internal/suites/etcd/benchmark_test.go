@@ -31,7 +31,6 @@ func TestNewBenchmarkOptions(t *testing.T) {
 		JobSuspend:                      false,
 		MonitoringAddonName:             "rancher-monitoring",
 		MonitoringNamespace:             "cattle-monitoring-system",
-		MonitoringOutputFormat:          "promql",
 		MonitoringRangeDuration:         300 * time.Second,
 		MonitoringWaitPodMonitorTimeout: 600 * time.Second,
 		NamespaceReadyTimeout:           300 * time.Second,

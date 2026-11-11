@@ -179,7 +179,7 @@ func (s *NodeCapacitySuite) execNodeDiskInfo(
 			klog.V(5).InfoS("exec", "cmd", strings.Join(cmd, " "), "pod", pod.Name, "suite", s.Name(), "case", caseName)
 			out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
 			cmdResult := suites.NewCmdResult(
-				strings.Join(cmd, " "),
+				cmd,
 				pod.Spec.NodeName,
 				out.Stdout,
 				out.Stderr,

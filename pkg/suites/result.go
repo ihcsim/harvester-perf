@@ -1,6 +1,7 @@
 package suites
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -402,12 +403,11 @@ func (c *CaseResult) String() string {
 // Err captures errors that occur during command execution, while Stdout and
 // Stderr capture the command's output streams.
 type CmdResult struct {
-	Cmd        string
-	Err        string
-	Node       string
-	Stdout     string `json:"-"`
-	Stderr     string
-	StdoutJSON json.RawMessage `json:"Stdout"`
+	Cmd    string
+	Err    string
+	Node   string
+	Stdout string
+	Stderr string
 }
 
 // NewCmdResult creates a new CmdResult instance with the provided parameters.
@@ -418,14 +418,44 @@ func NewCmdResult(cmd []string, node string, stdout string, stderr string, err e
 		Stdout: stdout,
 		Stderr: stderr,
 	}
-	if json.Valid([]byte(stdout)) {
-		r.StdoutJSON = json.RawMessage(stdout)
-	}
 	if err != nil {
 		r.Err = err.Error()
 	}
 
 	return r
+}
+
+// MarshalJSON implements the json.Marshaler interface for CmdResult. It ensures
+// that the Stdout field is properly formatted as a JSON string or raw JSON,
+// depending on its content.
+func (c CmdResult) MarshalJSON() ([]byte, error) {
+	v := struct {
+		Cmd    string
+		Err    string
+		Node   string
+		Stdout json.RawMessage
+		Stderr string
+	}{
+		Cmd:    c.Cmd,
+		Err:    c.Err,
+		Node:   c.Node,
+		Stderr: c.Stderr,
+	}
+
+	if json.Valid([]byte(c.Stdout)) {
+		buf := bytes.Buffer{}
+		if err := json.Compact(&buf, []byte(c.Stdout)); err != nil {
+			return nil, err
+		}
+		v.Stdout = json.RawMessage(buf.Bytes())
+	} else {
+		b, err := json.Marshal(c.Stdout)
+		if err != nil {
+			return nil, err
+		}
+		v.Stdout = b
+	}
+	return json.Marshal(v)
 }
 
 func (c *CmdResult) String() string {

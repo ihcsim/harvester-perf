@@ -1,6 +1,7 @@
 package suites
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -8,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/prometheus/common/model"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -790,4 +792,52 @@ func TestCaseResultWithError(t *testing.T) {
 			t.Errorf("Err=%q State=%q", c.Err, c.State)
 		}
 	})
+}
+
+func TestCmdResultMarshalJSON(t *testing.T) {
+	const (
+		prefix = `{"Cmd":"ls -alh","Err":"command failed with exit code 2","Node":"testNode",`
+		suffix = `,"Stderr":"ls: cannot access 'nonexistent': No such file or directory"}`
+	)
+	var (
+		cmd    = []string{"ls", "-alh"}
+		node   = "testNode"
+		stderr = "ls: cannot access 'nonexistent': No such file or directory"
+		cmdErr = fmt.Errorf("command failed with exit code 2")
+	)
+	testCases := []struct {
+		name   string
+		stdout string
+		want   string // expected value of the Stdout key
+	}{
+		{name: "empty", stdout: "", want: `""`},
+		{name: "plain text", stdout: "some output", want: `"some output"`},
+		{name: "plain text with newline", stdout: "hello\n", want: `"hello\n"`},
+		{name: "quotes and backslash", stdout: `a"b\c`, want: `"a\"b\\c"`},
+		{name: "json object", stdout: `{"foo":"bar"}`, want: `{"foo":"bar"}`},
+		{name: "json array", stdout: `[1,2]`, want: `[1,2]`},
+		{name: "number", stdout: "42\n", want: `42`},
+		{name: "float", stdout: "3.14", want: `3.14`},
+		{name: "bool true", stdout: "true", want: `true`},
+		{name: "bool false", stdout: "false\n", want: `false`},
+		{name: "pretty-printed json is compacted", stdout: "{ \"a\": 1 }\n", want: `{"a":1}`},
+		{name: "truncated json falls back to string", stdout: `{"a":`, want: `"{\"a\":"`},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewCmdResult(cmd, node, tc.stdout, stderr, cmdErr)
+			got, err := json.Marshal(c)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v, want nil", err)
+			}
+			if !json.Valid(got) {
+				t.Fatalf("json.Marshal() produced invalid JSON: %s", got)
+			}
+			want := prefix + `"Stdout":` + tc.want + suffix
+			if diff := cmp.Diff(string(got), want); diff != "" {
+				t.Errorf("json.Marshal() mismatch (-got +want):\n%s", diff)
+			}
+		})
+	}
 }

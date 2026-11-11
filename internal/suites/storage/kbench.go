@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -67,7 +68,7 @@ func (s *KBenchSuite) RunE(
 	klog.V(3).InfoS("namespace is ready\n", "name", namespace)
 
 	var caseResults []*suites.CaseResult
-	caseName := "kbench pod pvc (full)"
+	caseName := "kbench pod pvc"
 	klog.V(3).InfoS("running kbench pod with pvc\n", "suite", s.Name(), "case", caseName)
 	s.CaseStart(s.Name(), caseName)
 	caseResult := s.kbenchPodPVC(ctx, caseName, runID, namespace, o)
@@ -78,8 +79,9 @@ func (s *KBenchSuite) RunE(
 		nodeName, pvcName string
 
 		// the kbenchJobDuration is used to determine the promql query range. it is
-		// calculated as the time since the pod was ready. it captures the time for the
-		// kbench pod to finish its task and additional cleanup time. the overshoot is
+		// calculated as the time since the pod's start time. in addition to the time
+		// taken to complete the task, the duration overshoots to include the time for
+		// the kbench pod to finish its task and additional cleanup time. this is
 		// acceptable to account for late-arriving scrape samples.
 		kbenchJobDuration time.Duration
 	)
@@ -87,17 +89,13 @@ func (s *KBenchSuite) RunE(
 		switch v := obj.(type) {
 		case *corev1.Pod:
 			nodeName = v.Spec.NodeName
-			for _, condition := range v.Status.Conditions {
-				if condition.Type == corev1.PodReady && condition.Status == corev1.ConditionTrue {
-					kbenchJobDuration = time.Since(condition.LastTransitionTime.Time)
-				}
-			}
+			kbenchJobDuration = time.Since(v.Status.StartTime.Time)
 		case *corev1.PersistentVolumeClaim:
 			pvcName = v.GetName()
 		}
 	}
 	if nodeName != "" && pvcName != "" {
-		caseName = caseName + "-monitoring"
+		caseName = "longhorn monitoring"
 		klog.V(3).InfoS("running monitoring pod on node\n", "suite", s.Name(), "case", caseName, "node", nodeName)
 		s.CaseStart(s.Name(), caseName)
 		caseResult = s.monitoring(ctx, caseName, namespace, nodeName, pvcName, kbenchJobDuration, o)
@@ -140,11 +138,11 @@ func (s *KBenchSuite) kbenchPodPVC(
 	// job spec from https://github.com/longhorn/kbench/blob/main/deploy/fio.yaml
 	overrides := func(job *batchv1.Job) error {
 		overrideKBenchSpec(runID, job, opts)
-		overrideKBenchPVCMount(job, pvc)
-		return nil
+		overrideSidecarSpec(job, opts)
+		return overrideKBenchPVCMount(job, pvc)
 	}
 
-	job, pod, err := k8s.EnsureJobCompleted(
+	job, pod, err := k8s.EnsureJobContainerCompleted(
 		ctx,
 		s.Clients,
 		s.Name(),
@@ -180,12 +178,12 @@ func (s *KBenchSuite) kbenchPodPVC(
 	if opts.KBenchOutputFormat == "json" {
 		var cmdResults []*suites.CmdResult
 		for _, remoteFile := range []string{
-			"./test_device-read-iops.json",
-			"./test_device-write-iops.json",
-			"./test_device-read-bandwidth.json",
-			"./test_device-write-bandwidth.json",
-			"./test_device-read-latency.json",
-			"./test_device-write-latency.json",
+			filepath.Join("/temp", "test_device-read-iops.json"),
+			filepath.Join("/temp", "test_device-write-iops.json"),
+			filepath.Join("/temp", "test_device-read-bandwidth.json"),
+			filepath.Join("/temp", "test_device-write-bandwidth.json"),
+			filepath.Join("/temp", "test_device-read-latency.json"),
+			filepath.Join("/temp", "test_device-write-latency.json"),
 		} {
 			cmd := []string{"cat", remoteFile}
 			out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultSidecarContainerName, cmd)
@@ -350,14 +348,32 @@ func overrideKBenchSpec(runID string, job *batchv1.Job, opts *KBenchOptions) {
 	}
 }
 
-func overrideKBenchPVCMount(job *batchv1.Job, pvc *corev1.PersistentVolumeClaim) {
+func overrideSidecarSpec(job *batchv1.Job, opts *KBenchOptions) {
+	sidecar := corev1.Container{
+		Name:            opts.DefaultSidecarContainerName,
+		Image:           opts.KBenchImageName + ":" + opts.KBenchImageTag,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"/bin/bash", "-c", fmt.Sprintf("sleep %v", opts.JobActiveDeadline.Seconds())},
+	}
+	job.Spec.Template.Spec.Containers = append(job.Spec.Template.Spec.Containers, sidecar)
+}
+
+func overrideKBenchPVCMount(job *batchv1.Job, pvc *corev1.PersistentVolumeClaim) error {
+	if len(job.Spec.Template.Spec.Containers) < 2 {
+		return fmt.Errorf("job spec must have at least 2 containers, got %d", len(job.Spec.Template.Spec.Containers))
+	}
+
+	// the /temp part is hard coded in kbench run.sh script
 	job.Spec.Template.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{
-		{Name: "vol", MountPath: "/volume/"},
-		{Name: "temp-storage", MountPath: "/temp"},
+		{Name: "testdata", MountPath: "/volume/"},
+		{Name: "metadata", MountPath: "/temp"},
+	}
+	job.Spec.Template.Spec.Containers[1].VolumeMounts = []corev1.VolumeMount{
+		{Name: "metadata", MountPath: "/temp"},
 	}
 	job.Spec.Template.Spec.Volumes = []corev1.Volume{
 		{
-			Name: "vol",
+			Name: "testdata",
 			VolumeSource: corev1.VolumeSource{
 				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
 					ClaimName: pvc.GetName(),
@@ -365,12 +381,13 @@ func overrideKBenchPVCMount(job *batchv1.Job, pvc *corev1.PersistentVolumeClaim)
 			},
 		},
 		{
-			Name: "temp-storage",
+			Name: "metadata",
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		},
 	}
+	return nil
 }
 
 func (s *KBenchSuite) OptionsSchema() suites.Options {
@@ -400,10 +417,12 @@ type KBenchOptions struct {
 	RampTime           time.Duration // used in the promql range; kbench doesn't support overriding ramp time
 	TestSize           string
 
-	JobActiveDeadline      time.Duration
-	JobPodTTLAfterFinished time.Duration
-	JobPodReadyTimeout     time.Duration
-	JobSuspend             bool
+	DefaultPrimaryContainerName string
+	DefaultSidecarContainerName string
+	JobActiveDeadline           time.Duration
+	JobPodTTLAfterFinished      time.Duration
+	JobPodReadyTimeout          time.Duration
+	JobSuspend                  bool
 
 	KBenchImageName    string
 	KBenchImageTag     string
@@ -440,6 +459,10 @@ func NewKBenchOptions(override suites.Options) (*KBenchOptions, error) {
 	if err := merged.SetOutputFormat(defaultOutputOpts, jsonOutputOpts); err != nil {
 		return nil, fmt.Errorf("failed to set output format: %w", err)
 	}
+
+	// these container names should not be changed
+	merged.SetPrimaryContainerName()
+	merged["defaultSidecarContainerName"] = "sidecar"
 
 	o, err := options.FromOptions[*KBenchOptions](merged)
 	if err != nil {

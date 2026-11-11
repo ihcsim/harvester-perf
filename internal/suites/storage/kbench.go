@@ -67,7 +67,7 @@ func (s *KBenchSuite) RunE(
 	klog.V(3).InfoS("namespace is ready\n", "name", namespace)
 
 	var caseResults []*suites.CaseResult
-	caseName := "kbench-pod-pvc-full"
+	caseName := "kbench pod pvc (full)"
 	klog.V(3).InfoS("running kbench pod with pvc\n", "suite", s.Name(), "case", caseName)
 	s.CaseStart(s.Name(), caseName)
 	caseResult := s.kbenchPodPVC(ctx, caseName, runID, namespace, o)
@@ -139,7 +139,7 @@ func (s *KBenchSuite) kbenchPodPVC(
 
 	// job spec from https://github.com/longhorn/kbench/blob/main/deploy/fio.yaml
 	overrides := func(job *batchv1.Job) error {
-		overrideKBenchSpec(caseName, runID, job, opts)
+		overrideKBenchSpec(runID, job, opts)
 		overrideKBenchPVCMount(job, pvc)
 		return nil
 	}
@@ -173,6 +173,27 @@ func (s *KBenchSuite) kbenchPodPVC(
 	)
 	if err != nil {
 		return suites.NewCaseResultErrored(s.Name(), start, time.Now(), fmt.Errorf("pvc not bound: %v", err))
+	}
+
+	// if test suite is outputting json, cat the kbench output files from the pod
+	if opts.KBenchOutputFormat == "json" {
+		var cmdResults []*suites.CmdResult
+		for _, remoteFile := range []string{
+			"./test_device-read-iops.json",
+			"./test_device-write-iops.json",
+			"./test_device-read-bandwidth.json",
+			"./test_device-write-bandwidth.json",
+			"./test_device-read-latency.json",
+			"./test_device-write-latency.json",
+		} {
+			cmd := []string{"cat", remoteFile}
+			out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+			cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
+			cmdResults = append(cmdResults, cmdResult)
+		}
+
+		caseResult := suites.NewCaseResult(caseName, start, time.Now(), cmdResults, nil, job, pod, bound)
+		return caseResult
 	}
 
 	logOpts := &corev1.PodLogOptions{}
@@ -295,8 +316,8 @@ func (s *KBenchSuite) execPromQL(
 	return metricResults
 }
 
-func overrideKBenchSpec(caseName string, runID string, job *batchv1.Job, opts *KBenchOptions) {
-	fileName := fmt.Sprintf("/volume/hvperf-%s-%s.perf", caseName, runID)
+func overrideKBenchSpec(runID string, job *batchv1.Job, opts *KBenchOptions) {
+	fileName := fmt.Sprintf("/volume/hvperf-%s.perf", runID)
 	job.Spec.Template.Spec.HostNetwork = false
 	job.Spec.Template.Spec.Containers[0].Command = []string{} // use kbench default entrypoint
 	job.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{
@@ -381,12 +402,13 @@ type KBenchOptions struct {
 	JobPodReadyTimeout     time.Duration
 	JobSuspend             bool
 
-	KBenchImageName  string
-	KBenchImageTag   string
-	KBenchLimitCPU   resource.Quantity
-	KBenchLimitMem   resource.Quantity
-	KBenchRequestCPU resource.Quantity
-	KBenchRequestMem resource.Quantity
+	KBenchImageName    string
+	KBenchImageTag     string
+	KBenchOutputFormat string
+	KBenchLimitCPU     resource.Quantity
+	KBenchLimitMem     resource.Quantity
+	KBenchRequestCPU   resource.Quantity
+	KBenchRequestMem   resource.Quantity
 
 	LonghornNamespace     string
 	MonitoringAddonName   string
@@ -405,6 +427,17 @@ func NewKBenchOptions(override suites.Options) (*KBenchOptions, error) {
 	merged := options.DefaultGlobalOptions().
 		Merge(options.DefaultKBenchOptions()).
 		Merge(override)
+
+	defaultOutputOpts := func() {
+		merged["kbenchOutputFormat"] = ""
+	}
+	jsonOutputOpts := func() {
+		merged["kbenchOutputFormat"] = "json"
+	}
+	if err := merged.SetOutputFormat(defaultOutputOpts, jsonOutputOpts); err != nil {
+		return nil, fmt.Errorf("failed to set output format: %w", err)
+	}
+
 	o, err := options.FromOptions[*KBenchOptions](merged)
 	if err != nil {
 		return nil, err

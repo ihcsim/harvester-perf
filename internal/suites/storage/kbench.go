@@ -150,6 +150,7 @@ func (s *KBenchSuite) kbenchPodPVC(
 		s.Name(),
 		runID,
 		namespace,
+		opts.DefaultPrimaryContainerName,
 		"", // let k8s pick any node for this pod
 		opts.KBenchImageName+":"+opts.KBenchImageTag,
 		opts.JobActiveDeadline,
@@ -187,7 +188,7 @@ func (s *KBenchSuite) kbenchPodPVC(
 			"./test_device-write-latency.json",
 		} {
 			cmd := []string{"cat", remoteFile}
-			out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+			out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultSidecarContainerName, cmd)
 			cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 			cmdResults = append(cmdResults, cmdResult)
 		}
@@ -196,7 +197,9 @@ func (s *KBenchSuite) kbenchPodPVC(
 		return caseResult
 	}
 
-	logOpts := &corev1.PodLogOptions{}
+	logOpts := &corev1.PodLogOptions{
+		Container: opts.DefaultPrimaryContainerName,
+	}
 	result := &suites.PodLogResult{
 		Subject: fmt.Sprintf("%s/%s", pod.GetNamespace(), pod.GetName()),
 	}

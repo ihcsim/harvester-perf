@@ -15,11 +15,12 @@ func TestNewCapacityOptions(t *testing.T) {
 	}
 
 	want := &CapacityOptions{
-		NamespaceReadyTimeout: 300 * time.Second,
-		PodActiveDeadline:     3600 * time.Second,
-		PodImageName:          "registry.suse.com/bci/bci-base",
-		PodImageTag:           "latest",
-		PodReadyTimeout:       3600 * time.Second,
+		DefaultPrimaryContainerName: "hvperf",
+		NamespaceReadyTimeout:       300 * time.Second,
+		PodActiveDeadline:           3600 * time.Second,
+		PodImageName:                "registry.suse.com/bci/bci-base",
+		PodImageTag:                 "latest",
+		PodReadyTimeout:             3600 * time.Second,
 	}
 	if diff := cmp.Diff(got, want); diff != "" {
 		t.Errorf("NewCapacityOptions() mismatch (-want +got):\n%s", diff)

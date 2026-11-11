@@ -95,7 +95,7 @@ func (s *NetworkSuite) iperf3Server(
 	defer cancel()
 
 	cmd := []string{"iperf3", "-s", "-D", "-p", strconv.Itoa(o.IPerfServerPort)}
-	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
+	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, o.DefaultPrimaryContainerName, cmd)
 	cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 	return []*suites.CmdResult{cmdResult}, job, pod, nil
 }
@@ -137,7 +137,7 @@ func (s *NetworkSuite) iperf3Client(
 	if profile == ProfileUDPStream {
 		cmd = append(cmd, "-u", "-b", "0")
 	}
-	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
+	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, o.DefaultPrimaryContainerName, cmd)
 	cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 	return []*suites.CmdResult{cmdResult}, job, pod, nil
 }
@@ -190,6 +190,7 @@ func (s *NetworkSuite) iperf3Setup(
 		ctx,
 		s.Clients,
 		pod,
+		o.DefaultPrimaryContainerName,
 		o.IPerfRemoteCopyTargetDir,
 		o.IPerfBinLocalPath,
 	); err != nil {

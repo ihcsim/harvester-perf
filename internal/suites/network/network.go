@@ -138,14 +138,15 @@ func (s *NetworkSuite) RunE(
 }
 
 type NetworkOptions struct {
-	JobActiveDeadline      time.Duration
-	JobPodImageName        string
-	JobPodImageTag         string
-	JobPodNode             string
-	JobPodTTLAfterFinished time.Duration
-	JobPodReadyTimeout     time.Duration
-	JobSuspend             bool
-	NamespaceReadyTimeout  time.Duration
+	DefaultPrimaryContainerName string
+	JobActiveDeadline           time.Duration
+	JobPodImageName             string
+	JobPodImageTag              string
+	JobPodNode                  string
+	JobPodTTLAfterFinished      time.Duration
+	JobPodReadyTimeout          time.Duration
+	JobSuspend                  bool
+	NamespaceReadyTimeout       time.Duration
 
 	IPerfBinLocalPath           string
 	IPerfClientMessageSizeBytes int
@@ -189,6 +190,7 @@ func NewNetworkOptions(override suites.Options) (*NetworkOptions, error) {
 		return nil, fmt.Errorf("failed to set output format: %w", err)
 	}
 
+	merged.SetPrimaryContainerName()
 	return options.FromOptions[*NetworkOptions](merged)
 }
 

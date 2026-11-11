@@ -22,6 +22,7 @@ func CopyToJobPod(
 	ctx context.Context,
 	c *suites.Clients,
 	pod *corev1.Pod,
+	containerName string,
 	remoteTargetDir string,
 	sourcePaths ...string,
 ) error {
@@ -71,7 +72,7 @@ func CopyToJobPod(
 			Namespace(pod.GetNamespace()).
 			SubResource("exec").
 			VersionedParams(&corev1.PodExecOptions{
-				Container: "hvperf",
+				Container: containerName,
 				Command:   cmd,
 				Stdin:     true,
 				Stdout:    true,
@@ -111,6 +112,7 @@ func ExecPod(
 	ctx context.Context,
 	c *suites.Clients,
 	pod *corev1.Pod,
+	containerName string,
 	cmd []string,
 ) (ExecOutput, error) {
 	req := c.K8sClientSet.CoreV1().RESTClient().
@@ -120,7 +122,7 @@ func ExecPod(
 		Namespace(pod.GetNamespace()).
 		SubResource("exec").
 		VersionedParams(&corev1.PodExecOptions{
-			Container: "hvperf",
+			Container: containerName,
 			Command:   cmd,
 			Stdin:     false,
 			Stdout:    true,

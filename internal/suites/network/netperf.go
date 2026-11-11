@@ -98,7 +98,7 @@ func (s *NetworkSuite) netperfServer(
 
 	var cmdResult *suites.CmdResult
 	cmd := []string{"netserver", "-d", string(o.NetPerfIPFamily)}
-	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
+	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, o.DefaultPrimaryContainerName, cmd)
 	if err != nil {
 		// netperf server's stdout and stderr are interesting only if there is an error
 		cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
@@ -141,7 +141,7 @@ func (s *NetworkSuite) netperfClient(
 	}
 	cmd = append(cmd, o.NetPerfOutputFormat)
 	cmd = append(cmd, NetPerfProfileParams[profile]...)
-	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, cmd)
+	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, o.DefaultPrimaryContainerName, cmd)
 
 	// if the test output is rendered as json, we need to replace the newlines with
 	// | so that the output can be parsed as a value of a json object.
@@ -217,6 +217,7 @@ func (s *NetworkSuite) netperfSetup(
 		ctx,
 		s.Clients,
 		pod,
+		o.DefaultPrimaryContainerName,
 		o.NetPerfRemoteCopyTargetDir,
 		netperfBin,
 	); err != nil {

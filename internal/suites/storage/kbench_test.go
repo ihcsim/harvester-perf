@@ -30,10 +30,12 @@ func TestNewKBenchOptions(t *testing.T) {
 		RampTime:           60 * time.Second,
 		TestSize:           "30G",
 
-		JobActiveDeadline:      3600 * time.Second,
-		JobPodTTLAfterFinished: 300 * time.Second,
-		JobPodReadyTimeout:     3600 * time.Second,
-		JobSuspend:             false,
+		DefaultPrimaryContainerName: "hvperf",
+		DefaultSidecarContainerName: "sidecar",
+		JobActiveDeadline:           3600 * time.Second,
+		JobPodTTLAfterFinished:      300 * time.Second,
+		JobPodReadyTimeout:          3600 * time.Second,
+		JobSuspend:                  false,
 
 		KBenchImageName:  "longhornio/kbench",
 		KBenchImageTag:   "main-head",

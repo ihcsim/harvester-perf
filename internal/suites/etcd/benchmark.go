@@ -111,6 +111,7 @@ func (s *BenchmarkSuite) RunE(
 		ctx,
 		s.Clients,
 		pod,
+		o.DefaultPrimaryContainerName,
 		o.EtcdRemoteCopyTargetDir,
 		o.EtcdctlLocalPath,
 		o.EtcdBenchmarkLocalPath,
@@ -209,7 +210,7 @@ func (s *BenchmarkSuite) execHealthcheck(
 	for _, cmd := range cmds {
 		cmd = append(cmd, outArgs...)
 		cmd = append(cmd, args...)
-		out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+		out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
 		cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
 		cmdResults = append(cmdResults, cmdResult)
 	}
@@ -236,7 +237,7 @@ func (s *BenchmarkSuite) execCheckPerf(
 	args = append(args, outArgs...)
 	for _, cmd := range cmds {
 		cmd = append(cmd, args...)
-		out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+		out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
 
 		// 'check perf' doesn't return json output, so we wrap the output in a json
 		// object
@@ -312,7 +313,7 @@ func (s *BenchmarkSuite) execBenchmark(
 		cmd = append(cmd, args...)
 
 		var cmdResult *suites.CmdResult
-		outExec, errExec := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+		outExec, errExec := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
 		cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, outExec.Stdout, "", errExec)
 
 		// the benchmark tool usually returns very verbose stderr output. instead of
@@ -334,7 +335,7 @@ func (s *BenchmarkSuite) execBenchmark(
 				"-c",
 				"find /artifacts/ -type f -name '*.json' -exec cat {} + && rm /artifacts/*.json",
 			}
-			outFind, errFind := k8s.ExecPod(ctx, s.Clients, pod, cmdFind)
+			outFind, errFind := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmdFind)
 			cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, outFind.Stdout, outFind.Stderr, errFind)
 		}
 		cmdResults = append(cmdResults, cmdResult)
@@ -470,13 +471,14 @@ type BenchmarkOptions struct {
 	EtcdRemoteTLSCertDir    string
 	EtcdRemoteCopyTargetDir string
 
-	JobActiveDeadline      time.Duration
-	JobPodImageName        string
-	JobPodImageTag         string
-	JobPodNode             string
-	JobPodTTLAfterFinished time.Duration
-	JobPodReadyTimeout     time.Duration
-	JobSuspend             bool
+	DefaultPrimaryContainerName string
+	JobActiveDeadline           time.Duration
+	JobPodImageName             string
+	JobPodImageTag              string
+	JobPodNode                  string
+	JobPodTTLAfterFinished      time.Duration
+	JobPodReadyTimeout          time.Duration
+	JobSuspend                  bool
 
 	MonitoringAddonName             string
 	MonitoringNamespace             string
@@ -518,6 +520,7 @@ func NewBenchmarkOptions(override suites.Options) (*BenchmarkOptions, error) {
 		return nil, fmt.Errorf("failed to set output format: %w", err)
 	}
 
+	merged.SetPrimaryContainerName()
 	return options.FromOptions[*BenchmarkOptions](merged)
 }
 

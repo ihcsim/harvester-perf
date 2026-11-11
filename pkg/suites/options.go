@@ -175,3 +175,9 @@ func (o Options) SetOutputFormat(setDefaultOpts func(), setJSONOpts func()) erro
 	setDefaultOpts()
 	return nil
 }
+
+// SetPrimaryContainerName sets the default primary container name for the test
+// workloads used in test suites. This name should not be changed.
+func (o Options) SetPrimaryContainerName() {
+	o["defaultPrimaryContainerName"] = "hvperf"
+}

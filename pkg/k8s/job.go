@@ -212,3 +212,82 @@ func EnsureJobCompleted(
 	latest.SetGroupVersionKind(batchv1.SchemeGroupVersion.WithKind("Job"))
 	return latest, pod, nil
 }
+
+func EnsureJobContainerCompleted(
+	ctx context.Context,
+	c *suites.Clients,
+	suiteName string,
+	runID string,
+	namespace string,
+	containerName string,
+	node string,
+	imageName string,
+	jobActiveDeadline time.Duration,
+	readyTimeout time.Duration,
+	ttlAfterFinished time.Duration,
+	suspend bool,
+	overrides ...func(*batchv1.Job) error,
+) (*batchv1.Job, *corev1.Pod, error) {
+	job, pod, err := EnsureJobReady(
+		ctx,
+		c,
+		suiteName,
+		runID,
+		namespace,
+		node,
+		imageName,
+		jobActiveDeadline,
+		readyTimeout,
+		ttlAfterFinished,
+		suspend,
+		overrides...,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// job is ready, now wait for the specified container to complete
+	listWatch := &cache.ListWatch{
+		ListWithContextFunc: func(ctx context.Context, options metav1.ListOptions) (runtime.Object, error) {
+			options.FieldSelector = fmt.Sprintf("metadata.name=%s", pod.GetName())
+			options.LabelSelector = fmt.Sprintf("%s=%s", batchv1.JobNameLabel, job.GetName())
+			return c.K8sClientSet.CoreV1().Pods(job.GetNamespace()).List(ctx, options)
+		},
+		WatchFuncWithContext: func(ctx context.Context, options metav1.ListOptions) (watchapi.Interface, error) {
+			options.FieldSelector = fmt.Sprintf("metadata.name=%s", pod.GetName())
+			options.LabelSelector = fmt.Sprintf("%s=%s", batchv1.JobNameLabel, job.GetName())
+			return c.K8sClientSet.CoreV1().Pods(job.GetNamespace()).Watch(ctx, options)
+		},
+	}
+	ctxWithTimeout, cancel := watch.ContextWithOptionalTimeout(ctx, readyTimeout)
+	defer cancel()
+	event, err := watch.UntilWithSync(ctxWithTimeout, listWatch, &corev1.Pod{}, nil, func(event watchapi.Event) (bool, error) {
+		pod, ok := event.Object.(*corev1.Pod)
+		if !ok {
+			return false, fmt.Errorf("unexpected object type: %T", event.Object)
+		}
+
+		for _, containerStatus := range pod.Status.ContainerStatuses {
+			if containerStatus.Name == containerName {
+				if containerStatus.State.Terminated != nil {
+					return containerStatus.State.Terminated.ExitCode == 0 && containerStatus.State.Terminated.Reason == "Completed", nil
+				}
+			}
+		}
+		return false, nil
+	})
+	if err != nil {
+		return job, pod, err
+	}
+
+	latestPod := event.Object.(*corev1.Pod)
+	latestPod.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
+
+	latestJob, err := c.K8sClientSet.BatchV1().Jobs(job.GetNamespace()).Get(ctx, job.GetName(), metav1.GetOptions{})
+	if err != nil {
+		return job, latestPod, err
+	}
+	latestJob.SetGroupVersionKind(batchv1.SchemeGroupVersion.WithKind("Job"))
+
+	return latestJob, latestPod, nil
+}

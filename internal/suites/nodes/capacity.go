@@ -177,7 +177,7 @@ func (s *NodeCapacitySuite) execNodeDiskInfo(
 	for _, pod := range pods {
 		for _, cmd := range cmds {
 			klog.V(5).InfoS("exec", "cmd", strings.Join(cmd, " "), "pod", pod.Name, "suite", s.Name(), "case", caseName)
-			out, err := k8s.ExecPod(ctx, s.Clients, pod, cmd)
+			out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
 			cmdResult := suites.NewCmdResult(
 				cmd,
 				pod.Spec.NodeName,
@@ -209,12 +209,13 @@ func (s *NodeCapacitySuite) SetProgressReporter(reporter *suites.ProgressReporte
 }
 
 type CapacityOptions struct {
-	LsblkOutputFormat     string
-	NamespaceReadyTimeout time.Duration
-	PodActiveDeadline     time.Duration
-	PodImageName          string
-	PodImageTag           string
-	PodReadyTimeout       time.Duration
+	DefaultPrimaryContainerName string
+	LsblkOutputFormat           string
+	NamespaceReadyTimeout       time.Duration
+	PodActiveDeadline           time.Duration
+	PodImageName                string
+	PodImageTag                 string
+	PodReadyTimeout             time.Duration
 }
 
 func NewCapacityOptions(override suites.Options) (*CapacityOptions, error) {
@@ -232,5 +233,6 @@ func NewCapacityOptions(override suites.Options) (*CapacityOptions, error) {
 		return nil, fmt.Errorf("failed to set output format: %w", err)
 	}
 
+	runOpts.SetPrimaryContainerName()
 	return options.FromOptions[*CapacityOptions](runOpts)
 }

@@ -11,6 +11,7 @@ import (
 func TestNewBenchmarkOptions(t *testing.T) {
 	toolsDir := "/tmp"
 	expected := &BenchmarkOptions{
+		DefaultPrimaryContainerName:     "hvperf",
 		EtcdBenchmarkLocalPath:          "/tmp/benchmark",
 		EtcdctlLocalPath:                "/tmp/etcdctl",
 		EtcdNamespace:                   "kube-system",

@@ -24,6 +24,7 @@ type SuiteResult struct {
 	Params  []*SuiteParam
 	RunID   string
 	Results []*CaseResult
+	Verbose bool
 	Err     string
 }
 
@@ -79,11 +80,13 @@ func (s *SuiteResult) String() string {
 		fmt.Fprintf(&stringBuilder, "--- No test cases were executed.\n")
 	}
 
-	for i, param := range s.Params {
-		if i == 0 {
-			fmt.Fprintf(&stringBuilder, "%sParams:\n", indent)
+	if s.Verbose {
+		for i, param := range s.Params {
+			if i == 0 {
+				fmt.Fprintf(&stringBuilder, "%sParams:\n", indent)
+			}
+			fmt.Fprintf(&stringBuilder, "%s\t%s\n", indent, param)
 		}
-		fmt.Fprintf(&stringBuilder, "%s\t%s\n", indent, param)
 	}
 
 	passed, errored, skipped, total := s.summary()
@@ -186,6 +189,7 @@ type CaseResult struct {
 	Err           string
 	Objects       []runtime.Object `json:"-"`
 	State         CaseResultState
+	Verbose       bool
 }
 
 type CaseResultState string
@@ -376,16 +380,17 @@ func (c *CaseResult) String() string {
 		fmt.Fprint(tab, strings.Join(resultBlocks, "\n"))
 	}
 
-	if len(resultBlocks) > 0 && len(c.Objects) > 0 {
-		fmt.Fprint(tab, "\n")
-	}
-
-	for i, obj := range c.Objects {
-		label := indent + "Objects:"
-		if i > 0 {
-			label = indent
+	if c.Verbose {
+		if len(resultBlocks) > 0 && len(c.Objects) > 0 {
+			fmt.Fprint(tab, "\n")
 		}
-		fmt.Fprintf(tab, "%s\t%s\n", label, objectMeta(obj))
+		for i, obj := range c.Objects {
+			label := indent + "Objects:"
+			if i > 0 {
+				label = indent
+			}
+			fmt.Fprintf(tab, "%s\t%s\n", label, objectMeta(obj))
+		}
 	}
 
 	//nolint:errcheck
@@ -425,7 +430,6 @@ func NewCmdResult(cmd string, node string, stdout string, stderr string, err err
 
 func (c *CmdResult) String() string {
 	var sb strings.Builder
-
 	fmt.Fprintf(&sb, "Cmd: %s\n", c.Cmd)
 
 	// for cases where the command is executed on a specific node, include the node

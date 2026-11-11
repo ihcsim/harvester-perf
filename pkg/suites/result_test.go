@@ -241,7 +241,7 @@ func TestCaseResultString(t *testing.T) {
 				"Out:\nhealthy\n",
 		},
 		{
-			name: "stderr is not rendered in the output",
+			name: "stderr is rendered in the output",
 			result: &CaseResult{
 				CaseName:      "etcd healthcheck",
 				DateTimeStart: testStart,
@@ -258,7 +258,8 @@ func TestCaseResultString(t *testing.T) {
 				"    Started on:  2026-08-26T10:30:00Z\n" +
 				"    Ended at:    2026-08-26T10:30:01Z\n" +
 				"    Results:\n" +
-				"Cmd: etcdctl endpoint status\n",
+				"Cmd: etcdctl endpoint status\n" +
+				"Stderr: some warning\n",
 		},
 		{
 			name: "tabs in stdout are replaced with spaces so the tabwriter doesn't reinterpret them",
@@ -370,7 +371,7 @@ func TestCaseResultString(t *testing.T) {
 				"Logs:\ndone\n",
 		},
 		{
-			name: "objects follow results after a blank line",
+			name: "objects follow results after a blank line in verbose mode",
 			result: &CaseResult{
 				CaseName:      "etcd-benchmark",
 				DateTimeStart: testStart,
@@ -378,6 +379,7 @@ func TestCaseResultString(t *testing.T) {
 				State:         CaseResultStatePassed,
 				MetricResults: []*MetricResult{{Query: "up"}},
 				Objects:       []runtime.Object{newPod("harvester-system-perf", "etcd-benchmark-0")},
+				Verbose:       true,
 			},
 			expected: "--- PASS etcd-benchmark (1.5s)\n" +
 				"    Started on:  2026-08-26T10:30:00Z\n" +
@@ -388,12 +390,13 @@ func TestCaseResultString(t *testing.T) {
 				"    Objects:  (Pod) harvester-system-perf/etcd-benchmark-0\n",
 		},
 		{
-			name: "objects are labelled once and aligned",
+			name: "objects are labelled once and aligned in verbose mode",
 			result: &CaseResult{
 				CaseName:      "etcd-benchmark",
 				DateTimeStart: testStart,
 				DateTimeEnd:   testEnd,
 				State:         CaseResultStatePassed,
+				Verbose:       true,
 				Objects: []runtime.Object{
 					newPod("harvester-system-perf", "etcd-benchmark-0"),
 					newPod("harvester-system-perf", "etcd-benchmark-1"),

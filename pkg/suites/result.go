@@ -449,6 +449,11 @@ func (c *CmdResult) String() string {
 			fmt.Fprintf(&sb, "%s\n", strings.ReplaceAll(trimmed, "\t", "    "))
 		}
 	}
+	if stderr := c.Stderr; stderr != "" {
+		if trimmed := strings.TrimSpace(string(stderr)); trimmed != "" {
+			fmt.Fprintf(&sb, "Stderr: %s\n", strings.ReplaceAll(trimmed, "\t", "    "))
+		}
+	}
 
 	if err := c.Err; err != "" {
 		fmt.Fprintf(&sb, "Error: %v\n", err)

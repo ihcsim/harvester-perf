@@ -62,7 +62,6 @@ func DefaultKBenchOptions() suites.Options {
 		"latencyIoDepth":      1,
 		"latencyNumJobs":      1,
 		"mode":                "full",
-		"rampTime":            60 * time.Second, // kbench ramp time use in the promql range; kbench doesn't support overriding ramp time
 		"testSize":            "30G",
 		"kbenchImageName":     "longhornio/kbench",
 		"kbenchImageTag":      "main-head",

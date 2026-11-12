@@ -24,7 +24,20 @@ func init() {
 	suites.Register(NewKbenchSuite())
 }
 
-var _ suites.Suite = &KBenchSuite{}
+var (
+	_ suites.Suite = &KBenchSuite{}
+
+	// kbenchJSONOutputFiles contains the paths to kbench's JSON output files. their names
+	// and paths are hard coded in kbench's run.sh script
+	kbenchJSONOutputFiles = []string{
+		filepath.Join("/temp", "test_device-read-iops.json"),
+		filepath.Join("/temp", "test_device-write-iops.json"),
+		filepath.Join("/temp", "test_device-read-bandwidth.json"),
+		filepath.Join("/temp", "test_device-write-bandwidth.json"),
+		filepath.Join("/temp", "test_device-read-latency.json"),
+		filepath.Join("/temp", "test_device-write-latency.json"),
+	}
+)
 
 type KBenchSuite struct {
 	suites.SuiteMarshaler
@@ -78,18 +91,22 @@ func (s *KBenchSuite) RunE(
 	var (
 		nodeName, pvcName string
 
-		// the kbenchJobDuration is used to determine the promql query range. it is
-		// calculated as the time since the pod's start time. in addition to the time
-		// taken to complete the task, the duration overshoots to include the time for
-		// the kbench pod to finish its task and additional cleanup time. this is
-		// acceptable to account for late-arriving scrape samples.
+		// the kbenchJobDuration is used as the promql query range. it's calculated
+		// based on the pod start time, which is when kbench starts running. if the pod
+		// start time is not available, fall back to the pod creation time, which is
+		// when the job was created. this is a conservative estimate of the kbench run
+		// duration, but it should be sufficient for our purposes.
 		kbenchJobDuration time.Duration
 	)
 	for _, obj := range caseResult.Objects {
 		switch v := obj.(type) {
 		case *corev1.Pod:
 			nodeName = v.Spec.NodeName
-			kbenchJobDuration = time.Since(v.Status.StartTime.Time)
+			if st := v.Status.StartTime; st != nil {
+				kbenchJobDuration = time.Since(st.Time)
+			} else {
+				kbenchJobDuration = time.Since(v.CreationTimestamp.Time)
+			}
 		case *corev1.PersistentVolumeClaim:
 			pvcName = v.GetName()
 		}
@@ -98,7 +115,7 @@ func (s *KBenchSuite) RunE(
 		caseName = "longhorn monitoring"
 		klog.V(3).InfoS("running monitoring pod on node\n", "suite", s.Name(), "case", caseName, "node", nodeName)
 		s.CaseStart(s.Name(), caseName)
-		caseResult = s.monitoring(ctx, caseName, namespace, nodeName, pvcName, kbenchJobDuration, o)
+		caseResult = s.monitoring(ctx, caseName, namespace, pvcName, kbenchJobDuration, o)
 		caseResults = append(caseResults, caseResult)
 		s.CaseDone(s.Name(), caseName, caseResult.State, time.Since(caseResult.DateTimeStart))
 	}
@@ -177,14 +194,7 @@ func (s *KBenchSuite) kbenchPodPVC(
 	// if test suite is outputting json, cat the kbench output files from the pod
 	if opts.KBenchOutputFormat == "json" {
 		var cmdResults []*suites.CmdResult
-		for _, remoteFile := range []string{
-			filepath.Join("/temp", "test_device-read-iops.json"),
-			filepath.Join("/temp", "test_device-write-iops.json"),
-			filepath.Join("/temp", "test_device-read-bandwidth.json"),
-			filepath.Join("/temp", "test_device-write-bandwidth.json"),
-			filepath.Join("/temp", "test_device-read-latency.json"),
-			filepath.Join("/temp", "test_device-write-latency.json"),
-		} {
+		for _, remoteFile := range kbenchJSONOutputFiles {
 			cmd := []string{"cat", remoteFile}
 			out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultSidecarContainerName, cmd)
 			cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, out.Stderr, err)
@@ -226,7 +236,6 @@ func (s *KBenchSuite) monitoring(
 	ctx context.Context,
 	caseName string,
 	namespace string,
-	nodeName string,
 	pvcName string,
 	kbenchRunDuration time.Duration,
 	opts *KBenchOptions,
@@ -244,7 +253,7 @@ func (s *KBenchSuite) monitoring(
 		return suites.NewCaseResultSkipped(caseName, start, time.Now(), err)
 	}
 
-	results := s.execPromQL(ctx, namespace, nodeName, pvcName, kbenchRunDuration, opts)
+	results := s.execPromQL(ctx, namespace, pvcName, kbenchRunDuration, opts)
 	caseResult := suites.NewCaseResult(caseName, start, time.Now(), nil, results)
 	return caseResult
 }
@@ -252,15 +261,11 @@ func (s *KBenchSuite) monitoring(
 func (s *KBenchSuite) execPromQL(
 	ctx context.Context,
 	namespace string,
-	nodeName string,
 	pvcName string,
 	kbenchRunDuration time.Duration,
 	opts *KBenchOptions,
 ) []*suites.MetricResult {
-	var (
-		queryRangeWithRampTime = int(opts.RampTime.Seconds()) + int(kbenchRunDuration.Seconds())
-		queryRange             = int(kbenchRunDuration.Seconds())
-	)
+	queryRange := int(kbenchRunDuration.Seconds())
 
 	// validityCheckQueries are queries that check the validity of the test, such as
 	// whether the volume remained. Any non-normal values imply that the test result
@@ -273,10 +278,10 @@ func (s *KBenchSuite) execPromQL(
 	// volume movement among nodes). It ensures only the lowest value is returned.
 	validityCheckQueries := []string{
 		// pvc should remain healthy during the test
-		fmt.Sprintf(`min(min_over_time(longhorn_volume_robustness{namespace='%s', pvc='%s', pvc_namespace='%s', state='healthy'}[%ds]))`, opts.LonghornNamespace, pvcName, namespace, queryRangeWithRampTime),
+		fmt.Sprintf(`min(min_over_time(longhorn_volume_robustness{namespace='%s', pvc='%s', pvc_namespace='%s', state='healthy'}[%ds]))`, opts.LonghornNamespace, pvcName, namespace, queryRange),
 
 		// volume should remain attached
-		fmt.Sprintf(`min(min_over_time(longhorn_volume_state{namespace='%s', pvc='%s', pvc_namespace='%s', state='attached'}[%ds]))`, opts.LonghornNamespace, pvcName, namespace, queryRangeWithRampTime),
+		fmt.Sprintf(`min(min_over_time(longhorn_volume_state{namespace='%s', pvc='%s', pvc_namespace='%s', state='attached'}[%ds]))`, opts.LonghornNamespace, pvcName, namespace, queryRange),
 	}
 
 	// overheadQueries are queries that check the resource usage of the instance
@@ -414,7 +419,6 @@ type KBenchOptions struct {
 	LatencyIoDepth     int
 	LatencyNumJobs     int
 	Mode               ModeType
-	RampTime           time.Duration // used in the promql range; kbench doesn't support overriding ramp time
 	TestSize           string
 
 	DefaultPrimaryContainerName string

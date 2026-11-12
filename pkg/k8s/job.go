@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/harvester/hvperf/pkg/suites"
@@ -261,27 +262,37 @@ func EnsureJobContainerCompleted(
 	}
 	ctxWithTimeout, cancel := watch.ContextWithOptionalTimeout(ctx, readyTimeout)
 	defer cancel()
-	event, err := watch.UntilWithSync(ctxWithTimeout, listWatch, &corev1.Pod{}, nil, func(event watchapi.Event) (bool, error) {
+
+	var latestPod *corev1.Pod
+	if _, err := watch.UntilWithSync(ctxWithTimeout, listWatch, &corev1.Pod{}, nil, func(event watchapi.Event) (bool, error) {
 		pod, ok := event.Object.(*corev1.Pod)
 		if !ok {
 			return false, fmt.Errorf("unexpected object type: %T", event.Object)
 		}
+		latestPod = pod.DeepCopy()
+		latestPod.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
 
-		for _, containerStatus := range pod.Status.ContainerStatuses {
+		for _, containerStatus := range latestPod.Status.ContainerStatuses {
 			if containerStatus.Name == containerName {
 				if containerStatus.State.Terminated != nil {
-					return containerStatus.State.Terminated.ExitCode == 0 && containerStatus.State.Terminated.Reason == "Completed", nil
+					if containerStatus.State.Terminated.ExitCode != 0 {
+						err := fmt.Sprintf("container %s in pod %s failed with exit code %d: (%s) %s",
+							containerName,
+							latestPod.GetName(),
+							containerStatus.State.Terminated.ExitCode,
+							containerStatus.State.Terminated.Reason,
+							containerStatus.State.Terminated.Message)
+						err = strings.TrimSpace(err)
+						return false, fmt.Errorf("%s", err)
+					}
+					return true, nil
 				}
 			}
 		}
 		return false, nil
-	})
-	if err != nil {
-		return job, pod, err
+	}); err != nil {
+		return job, latestPod, err
 	}
-
-	latestPod := event.Object.(*corev1.Pod)
-	latestPod.SetGroupVersionKind(corev1.SchemeGroupVersion.WithKind("Pod"))
 
 	latestJob, err := c.K8sClientSet.BatchV1().Jobs(job.GetNamespace()).Get(ctx, job.GetName(), metav1.GetOptions{})
 	if err != nil {

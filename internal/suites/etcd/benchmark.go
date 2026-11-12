@@ -2,6 +2,7 @@ package etcd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,12 +79,11 @@ func (s *BenchmarkSuite) RunE(
 
 	// ensure the job is created and ready
 	overrides := func(job *batchv1.Job) error {
-		job.Spec.Template.Spec.Containers[0].Env = []corev1.EnvVar{
-			{
-				Name:  "ARTIFACTS",
-				Value: "/artifacts",
-			},
+		envVar := corev1.EnvVar{
+			Name:  "ARTIFACTS",
+			Value: "/artifacts",
 		}
+		job.Spec.Template.Spec.Containers[0].Env = append(job.Spec.Template.Spec.Containers[0].Env, envVar)
 		return nil
 	}
 	_, pod, err := k8s.EnsureJobReady(ctx, s.Clients,
@@ -237,26 +237,14 @@ func (s *BenchmarkSuite) execCheckPerf(
 	args = append(args, outArgs...)
 	for _, cmd := range cmds {
 		cmd = append(cmd, args...)
-		out, err := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
-
-		// 'check perf' doesn't return json output, so we wrap the output in a json
-		// object
-		stdout := out.Stdout
-		if stdout != "" && opts.EtcdctlOutputFormat == "json" {
-			stdout = strings.ReplaceAll(stdout, "\n", "|")
-			stdout = fmt.Sprintf(`{"out": "%s"}`, stdout)
-		}
-		cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, stdout, "", err)
+		out, errExec := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
+		cmdResult := suites.NewCmdResult(cmd, pod.Spec.NodeName, out.Stdout, "", errExec)
 		cmdResults = append(cmdResults, cmdResult)
 
-		// 'check perf' usually returns very verbose stderr output. instead of cramming
-		// it into the result, we save it to a file in the current working directory.
+		// 'check perf' returns very verbose stderr output. instead of cramming it into
+		// the result, we save it to a temp file.
 		if out.Stderr != "" {
-			timestamp := time.Now().Format("20060102-150405")
-			savedTo := filepath.Join("./", fmt.Sprintf("%s-%s-stderr.log", name, timestamp))
-			if err := os.WriteFile(savedTo, []byte(out.Stderr), 0o644); err != nil {
-				klog.V(3).ErrorS(err, "failed to save benchmark stderr output to file", "file", savedTo)
-			}
+			writeToTemp(out.Stderr, name)
 		}
 	}
 
@@ -307,35 +295,44 @@ func (s *BenchmarkSuite) execBenchmark(
 	var cmdResults []*suites.CmdResult
 	start := time.Now()
 	for _, cmd := range cmds {
-		if opts.EtcdBenchmarkOutputFormat != "" {
-			cmd = append(cmd, opts.EtcdBenchmarkOutputFormat)
-		}
 		cmd = append(cmd, args...)
+		if opts.EtcdBenchmarkOutputFormat == "--report-perfdash" {
+			// remove any existing json files in the /artifacts folder from the previous
+			// benchmark run before starting the next run. this ensures that we only have
+			// the latest benchmark results in the /artifacts folder.
+			cmd = append(cmd, opts.EtcdBenchmarkOutputFormat)
+			cmd = []string{
+				"/bin/bash",
+				"-c",
+				fmt.Sprintf("rm -f /artifacts/*.json && %s", strings.Join(cmd, " ")),
+			}
+		}
 
 		var cmdResult *suites.CmdResult
 		outExec, errExec := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmd)
 		cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, outExec.Stdout, "", errExec)
 
 		// the benchmark tool usually returns very verbose stderr output. instead of
-		// cramming it into the result, we save it to a file in the current working directory.
+		// cramming it into the result, we save it to a temp file.
 		if outExec.Stderr != "" {
-			timestamp := time.Now().Format("20060102-150405")
-			savedTo := filepath.Join("./", fmt.Sprintf("%s-%s-stderr.log", name, timestamp))
-			if err := os.WriteFile(savedTo, []byte(outExec.Stderr), 0o644); err != nil {
-				klog.V(3).ErrorS(err, "failed to save benchmark stderr output to file", "file", savedTo)
-			}
+			writeToTemp(outExec.Stderr, name)
 		}
 
 		// if benchmark completed with no errors and the output format is set to
-		// --report-perfdash, then we need to cat the json result file in the
-		// container's /artifacts folder
+		// report-perfdash, then we cat the json result file in the container's
+		// /artifacts folder.
+		// in this output format, we only want json content so we can discard the
+		// stdout and stderr of the original benchmark command.
 		if errExec == nil && opts.EtcdBenchmarkOutputFormat == "--report-perfdash" {
 			cmdFind := []string{
 				"/bin/bash",
 				"-c",
-				"find /artifacts/ -type f -name '*.json' -exec cat {} + && rm /artifacts/*.json",
+				"find /artifacts/ -type f -name '*.json' -exec cat {} +",
 			}
 			outFind, errFind := k8s.ExecPod(ctx, s.Clients, pod, opts.DefaultPrimaryContainerName, cmdFind)
+			if errFind == nil && strings.TrimSpace(outFind.Stdout) == "" {
+				errFind = errors.New("no perfdash json files found in /artifacts")
+			}
 			cmdResult = suites.NewCmdResult(cmd, pod.Spec.NodeName, outFind.Stdout, outFind.Stderr, errFind)
 		}
 		cmdResults = append(cmdResults, cmdResult)
@@ -441,6 +438,36 @@ func (s *BenchmarkSuite) execPromQL(
 		metricResults = append(metricResults, result)
 	}
 	return metricResults
+}
+
+// writeToTemp writes the given content to a temporary file and logs the path.
+// all errors are logged but not returned, since this is a best-effort operation
+// and should not fail the benchmark suite.
+func writeToTemp(content string, caseName string) {
+	timestamp := time.Now().Format("20060102-150405")
+	tmpFile, err := os.CreateTemp("", fmt.Sprintf("%s-%s-stderr-*.log", caseName, timestamp))
+	defer func() {
+		if tmpFile != nil {
+			//nolint:errcheck
+			tmpFile.Close()
+		}
+	}()
+	if err != nil {
+		klog.V(3).ErrorS(err, "failed to create temp file for benchmark stderr output", "case", caseName)
+		return
+	}
+
+	if _, err := tmpFile.WriteString(content); err != nil {
+		klog.V(3).ErrorS(err, "failed to write benchmark stderr output to temp file", "case", caseName)
+		return
+	}
+
+	absPath, err := filepath.Abs(tmpFile.Name())
+	if err != nil {
+		klog.V(3).ErrorS(err, "failed to get absolute path of temp file for benchmark stderr output", "case", caseName)
+		return
+	}
+	klog.V(3).InfoS("saved benchmark stderr output to temp file", "case", caseName, "path", absPath)
 }
 
 func (s *BenchmarkSuite) OptionsSchema() suites.Options {

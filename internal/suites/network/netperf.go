@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
@@ -142,19 +141,10 @@ func (s *NetworkSuite) netperfClient(
 	cmd = append(cmd, o.NetPerfOutputFormat)
 	cmd = append(cmd, NetPerfProfileParams[profile]...)
 	out, err := k8s.ExecPod(ctxWithTimeout, s.Clients, pod, o.DefaultPrimaryContainerName, cmd)
-
-	// if the test output is rendered as json, we need to replace the newlines with
-	// | so that the output can be parsed as a value of a json object.
-	stdout := out.Stdout
-	if stdout != "" && o.NetPerfOutputFormat == "-k" {
-		stdout = strings.ReplaceAll(stdout, "\n", "|")
-		stdout = fmt.Sprintf(`{"out":"%s"}`, stdout)
-	}
-
 	cmdResult := suites.NewCmdResult(
 		cmd,
 		pod.Spec.NodeName,
-		stdout,
+		out.Stdout,
 		out.Stderr,
 		err,
 	)

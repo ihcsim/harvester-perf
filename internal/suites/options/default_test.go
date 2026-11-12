@@ -49,7 +49,6 @@ func TestDefaultOptionsFromOptions(t *testing.T) {
 			LatencyIoDepth      int
 			LatencyNumJobs      int
 			Mode                string
-			RampTime            time.Duration
 			TestSize            string
 			KBenchImageName     string
 			KBenchImageTag      string
@@ -78,7 +77,6 @@ func TestDefaultOptionsFromOptions(t *testing.T) {
 			LatencyIoDepth:      1,
 			LatencyNumJobs:      1,
 			Mode:                "full",
-			RampTime:            60 * time.Second,
 			TestSize:            "30G",
 			KBenchImageName:     "longhornio/kbench",
 			KBenchImageTag:      "main-head",

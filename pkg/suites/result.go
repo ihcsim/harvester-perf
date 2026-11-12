@@ -178,11 +178,11 @@ func (c *CapacityResult) String() string {
 // CaseResult represents the result of a single test case execution. Err captures
 // errors that occur during the test case setup and cleanup.
 type CaseResult struct {
-	CapacityResults    []*CapacityResult
-	CmdResults         []*CmdResult
-	K8sResourceResults []*K8sResourceResult
-	MetricResults      []*MetricResult
-	PodLogResults      []*PodLogResult
+	CapacityResults    []*CapacityResult    `json:",omitempty"`
+	CmdResults         []*CmdResult         `json:",omitempty"`
+	K8sResourceResults []*K8sResourceResult `json:",omitempty"`
+	MetricResults      []*MetricResult      `json:",omitempty"`
+	PodLogResults      []*PodLogResult      `json:",omitempty"`
 
 	CaseName      string
 	DateTimeStart time.Time

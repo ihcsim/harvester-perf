@@ -27,7 +27,6 @@ func TestNewKBenchOptions(t *testing.T) {
 		LatencyIoDepth:     1,
 		LatencyNumJobs:     1,
 		Mode:               ModeFull,
-		RampTime:           60 * time.Second,
 		TestSize:           "30G",
 
 		DefaultPrimaryContainerName: "hvperf",

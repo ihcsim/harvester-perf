@@ -107,6 +107,9 @@ Results are written to stdout; suite progress is logged to stderr, so
 `-q`/`--quiet` to silence the progress logging, or `-v <level>` to raise it.
 Results are printed even when a suite fails, so partial output is not lost.
 
+`-ojson` outputs the test suite result in JSON format; great for letting an
+agent compare results across multiple runs.
+
 ### Setting up the tools
 
 Some suites need extra binaries: `etcd-benchmark` uses `etcdctl` and

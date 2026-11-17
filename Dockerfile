@@ -103,6 +103,20 @@ RUN --mount=type=cache,target=/go/pkg/mod \
   go test -cover -race -shuffle=on ./...
 
 # --------------------
+# hvperf target - lint
+# --------------------
+FROM hvperf-base AS hvperf-lint
+ENV GOLANGCI_LINT_CACHE=/.cache/golangci-lint
+COPY --from=golangci/golangci-lint:v2.15.0-alpine@sha256:2ba875b990f1d8501ad4ec19be1ea0701e316ec3a4b764f7b129f62f01318bbf /usr/bin/golangci-lint /usr/local/bin/golangci-lint
+RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
+  --mount=type=cache,target=/root/.cache/golangci-lint \
+  golangci-lint run --timeout=10m && \
+  go vet ./... && \
+  go fmt ./...
+
+
+# --------------------
 # hvperf target - dist
 # --------------------
 FROM scratch AS hvperf-dist

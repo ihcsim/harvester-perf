@@ -101,9 +101,10 @@ func TestWaitRunningSeparatesFailures(t *testing.T) {
 	for _, failure := range []string{"none", "startup-timeout", "vmi-failed", "list", "watch", "get-status", "list-pods", "cancel"} {
 		t.Run(failure, func(t *testing.T) {
 			phase := "Pending"
-			if failure == "none" {
+			switch failure {
+			case "none":
 				phase = "Running"
-			} else if failure == "vmi-failed" {
+			case "vmi-failed":
 				phase = "Failed"
 			}
 			vmi := &unstructured.Unstructured{Object: map[string]any{
@@ -116,9 +117,10 @@ func TestWaitRunningSeparatesFailures(t *testing.T) {
 			switch failure {
 			case "list", "get-status", "list-pods":
 				verb, target := "list", "virtualmachineinstances"
-				if failure == "get-status" {
+				switch failure {
+				case "get-status":
 					verb = "get"
-				} else if failure == "list-pods" {
+				case "list-pods":
 					target = "pods"
 				}
 				client.PrependReactor(verb, target, func(k8stesting.Action) (bool, runtime.Object, error) {

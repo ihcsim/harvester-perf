@@ -136,13 +136,13 @@ func labelListWatch(ctx context.Context, client dynamic.Interface, ns, selector 
 	}
 	res := client.Resource(VMIGVR).Namespace(ns)
 	return &cache.ListWatch{
-		ListFunc: func(opts metav1.ListOptions) (runtime.Object, error) {
+		ListWithContextFunc: func(ctx context.Context, opts metav1.ListOptions) (runtime.Object, error) {
 			opts.LabelSelector = selector
 			obj, err := res.List(ctx, opts)
 			record(err)
 			return obj, err
 		},
-		WatchFunc: func(opts metav1.ListOptions) (k8swatch.Interface, error) {
+		WatchFuncWithContext: func(ctx context.Context, opts metav1.ListOptions) (k8swatch.Interface, error) {
 			opts.LabelSelector = selector
 			watcher, err := res.Watch(ctx, opts)
 			record(err)

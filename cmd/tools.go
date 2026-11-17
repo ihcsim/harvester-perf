@@ -108,6 +108,7 @@ func fetchFromURL(url string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to download tools from %s: %v", toolSource, err)
 	}
+	//nolint: errcheck
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {

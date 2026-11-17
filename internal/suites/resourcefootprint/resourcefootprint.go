@@ -73,7 +73,7 @@ func (s *ResourceFootprintSuite) measure(ctx context.Context, queries ...string)
 	metrics := make([]*suites.MetricResult, 0, len(queries))
 	start := time.Now()
 	for _, query := range queries {
-		samples, warnings, err := pkgprom.RunInstant(ctx, s.Clients.PromClient, query)
+		samples, warnings, err := pkgprom.RunInstant(ctx, s.PromClient, query)
 		metric := &suites.MetricResult{
 			Query:    query,
 			Samples:  samples,

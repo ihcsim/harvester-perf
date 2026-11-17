@@ -326,6 +326,10 @@ func (c *CaseResult) WithError(err error) *CaseResult {
 	return c
 }
 
+// String returns a human-readable string representation of the CaseResult,
+// including its state, execution time, and any errors or results associated with
+// the test case.
+// nolint: errcheck
 func (c *CaseResult) String() string {
 	var (
 		stringBuilder strings.Builder

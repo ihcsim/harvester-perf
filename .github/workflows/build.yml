@@ -1,0 +1,24 @@
+name: build
+
+on:
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE", ".github/ISSUE_TEMPLATE/**"]
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE", ".github/ISSUE_TEMPLATE/**"]
+  schedule:
+    # every frday at 20:00 UTC
+    - cron: "0 20 * * 5"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v4
+      - run: make go/lint
+      - run: make go/test
+      - run: make go/build
